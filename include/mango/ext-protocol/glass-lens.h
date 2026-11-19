@@ -8,5 +8,9 @@
  * a popup, placed by the client and applied with the surface's commits.
  */
 void glass_lens_manager_create(struct wl_display *display);
+struct wlr_surface;
+/* Shows a surface's lens, if it has one, in glass that the surface's commit
+ * just made or reshaped. */
+void glass_lens_apply(struct wlr_surface *surface);
 
 #endif

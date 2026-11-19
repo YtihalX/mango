@@ -4,6 +4,7 @@
 #include "mango/common/scene_node.h"
 #include "mango/common/server.h"
 #include "mango/common/util.h"
+#include "mango/ext-protocol/glass-lens.h"
 #include "mango/ext-protocol/text-input.h"
 #include "mango/input/pointer.h"
 #include "mango/ipc/ipc.h"
@@ -539,6 +540,7 @@ static void popup_update_glass(Popup *popup) {
 	wlr_scene_blur_set_size(popup->glass, geometry->width, geometry->height);
 	wlr_scene_blur_set_corner_radius(popup->glass, radius);
 	wlr_scene_node_set_enabled(&popup->glass->node, true);
+	glass_lens_apply(wlr_popup->base->surface);
 }
 
 void handle_popup_destroy(struct wl_listener *listener, void *data) {
@@ -550,9 +552,12 @@ void handle_popup_destroy(struct wl_listener *listener, void *data) {
 		wl_list_remove(&popup->commit.link);
 		popup->commit.notify = NULL;
 	}
-	// The glass goes with the popup's scene tree
-	if (popup->glass)
+	// The scene tree outlives the role until its xdg_surface goes; the glass
+	// goes now, with the popup's content
+	if (popup->glass) {
 		wl_list_remove(&popup->glass_destroy.link);
+		wlr_scene_node_destroy(&popup->glass->node);
+	}
 	if (popup->wlr_popup)
 		popup->wlr_popup->base->data = NULL;
 	if (server.selected_monitor && server.selected_monitor->sel)

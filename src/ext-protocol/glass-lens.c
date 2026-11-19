@@ -29,7 +29,8 @@ struct glass_lens {
  * surface or popup. That glass comes and goes with its surface, so every
  * commit applies the lens again; setting the same lens twice does nothing. A
  * popup's glass starts at the corner of its window geometry, not of its
- * surface. */
+ * surface, and is made and reshaped after this commit callback: mango shows
+ * the lens again then (glass_lens_apply). */
 static void show_lens(struct glass_lens *lens,
 					  const struct glass_lens_state *state) {
 	struct wlr_scene_blur *glass = NULL;
@@ -44,7 +45,7 @@ static void show_lens(struct glass_lens *lens,
 	} else if (xdg_popup) {
 		Popup *popup = xdg_popup->base->data;
 		glass = popup ? popup->glass : NULL;
-		offset = xdg_popup->base->current.geometry;
+		offset = xdg_popup->base->geometry;
 	}
 	if (!glass)
 		return;
@@ -87,6 +88,15 @@ static const struct wlr_addon_interface lens_addon_impl = {
 	.name = "mango_glass_lens_v1",
 	.destroy = handle_surface_gone,
 };
+
+void glass_lens_apply(struct wlr_surface *surface) {
+	struct wlr_addon *addon =
+		wlr_addon_find(&surface->addons, NULL, &lens_addon_impl);
+	if (addon) {
+		struct glass_lens *lens = wl_container_of(addon, lens, addon);
+		show_lens(lens, &lens->current);
+	}
+}
 
 static void handle_lens_set_box(struct wl_client *client,
 								struct wl_resource *resource, int32_t x,
