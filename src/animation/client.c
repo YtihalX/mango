@@ -1432,19 +1432,13 @@ void init_fadeout_client(Client *c) {
 		while (head->group_prev)
 			head = head->group_prev;
 		for (Client *it = head; it; it = it->group_next)
-			if (it->group_bar)
-				mango_decoration_snapshot(it->group_bar->scene,
-					it->group_bar->glass, fadeout_client->scene);
+			mango_bar_decoration_snapshot(it->group_bar, fadeout_client->scene);
 		head = c;
 		while (head->tab_prev)
 			head = head->tab_prev;
 		for (Client *it = head; it; it = it->tab_next)
-			if (it->tab_bar)
-				mango_decoration_snapshot(it->tab_bar->scene,
-					it->tab_bar->glass, fadeout_client->scene);
-		if (c->jump_label_node)
-			mango_decoration_snapshot(c->jump_label_node->scene,
-				c->jump_label_node->glass, fadeout_client->scene);
+			mango_bar_decoration_snapshot(it->tab_bar, fadeout_client->scene);
+		mango_jump_label_snapshot(c->jump_label_node, fadeout_client->scene);
 	}
 	c->snapshot_temp_visible = false;
 	client_update_visibility(c);

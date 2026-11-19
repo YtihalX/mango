@@ -187,8 +187,9 @@ void mango_bar_decoration_apply_config(MangoBarDecoration *node,
 									   const DecorateDrawData *data);
 
 /* Decoration snapshots keep their natural size while the window closes. */
-void mango_decoration_snapshot(struct wlr_scene_tree *scene,
-							   struct wlr_scene_blur *glass,
+void mango_bar_decoration_snapshot(MangoBarDecoration *bar,
+								   struct wlr_scene_tree *parent);
+void mango_jump_label_snapshot(MangoJumpLabel *label,
 							   struct wlr_scene_tree *parent);
 void mango_decorations_set_opacity(struct wlr_scene_node *node, float opacity);
 #endif // jump_label_node_H

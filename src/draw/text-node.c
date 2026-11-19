@@ -559,11 +559,14 @@ static void jump_label_apply_geometry(MangoJumpLabel *node) {
 
 	rect_apply_border(node->border, node->border_color, node->corner_radius,
 					  node->corner_radius, border, width, height);
-	rect_apply(node->bg, node->focused ? node->focus_bg_color : node->bg_color,
+	rect_apply(node->bg,
+			   node->use_glass ? (float[4]){0}
+			   : node->focused ? node->focus_bg_color
+							   : node->bg_color,
 			   node->corner_radius, border, border, width - 2 * border,
 			   height - 2 * border);
 	wlr_scene_node_set_enabled(&node->border->node, !node->use_glass);
-	wlr_scene_node_set_enabled(&node->bg->node, !node->use_glass);
+	wlr_scene_node_set_enabled(&node->bg->node, true);
 	decoration_glass_update(&node->glass, node->scene, node->use_glass,
 						   width, height, node->corner_radius,
 						   node->padding_x, node->padding_y, node->focused);
@@ -800,10 +803,16 @@ static void bar_decoration_apply_geometry(MangoBarDecoration *node) {
 
 	rect_apply_border(node->border, node->border_color, node->corner_radius,
 					  node->corner_radius, border, width, height);
-	rect_apply(node->bg, node->focused ? node->focus_bg_color : node->bg_color,
+	/* Transparent rectangles still take input: the glass cannot replace the
+	 * padding's hit box because blur nodes are deliberately input-transparent.
+	 */
+	rect_apply(node->bg,
+			   node->use_glass ? (float[4]){0}
+			   : node->focused ? node->focus_bg_color
+							   : node->bg_color,
 			   node->corner_radius, border, border, inner_w, inner_h);
 	wlr_scene_node_set_enabled(&node->border->node, !node->use_glass);
-	wlr_scene_node_set_enabled(&node->bg->node, !node->use_glass);
+	wlr_scene_node_set_enabled(&node->bg->node, true);
 	decoration_glass_update(&node->glass, node->scene, node->use_glass,
 						   width, height, node->corner_radius,
 						   node->padding_x, node->padding_y,
@@ -1210,33 +1219,39 @@ void mango_decorations_set_opacity(struct wlr_scene_node *node, float opacity) {
 }
 
 static void decoration_snapshot_buffer(struct wlr_scene_buffer *buffer,
-									  int32_t x, int32_t y, void *data) {
-	struct wlr_scene_buffer *copy = wlr_scene_buffer_create(data, buffer->buffer);
+									   struct mango_text_buffer *source,
+									   struct wlr_scene_tree *parent) {
+	if (!source || !buffer->node.enabled)
+		return;
+	/* The scene node releases its upload buffer after rendering. The
+	 * decoration retains the CPU buffer, which the close snapshot can lock. */
+	struct wlr_scene_buffer *copy =
+		wlr_scene_buffer_create(parent, &source->base);
 	if (!copy)
 		return;
-	wlr_scene_node_set_position(&copy->node, x, y);
+	wlr_scene_node_set_position(&copy->node, buffer->node.x, buffer->node.y);
 	wlr_scene_buffer_set_dest_size(copy, buffer->dst_width, buffer->dst_height);
 	wlr_scene_buffer_set_source_box(copy, &buffer->src_box);
 	wlr_scene_buffer_set_opacity(copy, buffer->opacity);
 }
 
-void mango_decoration_snapshot(struct wlr_scene_tree *scene,
-							   struct wlr_scene_blur *source,
-							   struct wlr_scene_tree *parent) {
+static struct wlr_scene_tree *
+decoration_snapshot(struct wlr_scene_tree *scene, struct wlr_scene_blur *source,
+					struct wlr_scene_tree *parent) {
 	if (!source || !scene->node.enabled)
-		return;
+		return NULL;
 	int32_t x, y;
 	if (!wlr_scene_node_coords(&scene->node, &x, &y))
-		return;
+		return NULL;
 	struct wlr_scene_tree *tree = wlr_scene_tree_create(parent);
 	if (!tree)
-		return;
+		return NULL;
 	wlr_scene_node_set_position(&tree->node, x, y);
 	struct wlr_scene_blur *glass =
 		wlr_scene_blur_create(tree, source->width, source->height);
 	if (!glass) {
 		wlr_scene_node_destroy(&tree->node);
-		return;
+		return NULL;
 	}
 	wlr_scene_blur_set_glass(glass, true);
 	wlr_scene_blur_set_should_only_blur_bottom_layer(glass, false);
@@ -1247,7 +1262,27 @@ void mango_decoration_snapshot(struct wlr_scene_tree *scene,
 								source->glass_lens_radius, &source->glass_lens_clip);
 	/* No Snapshot payload: window zoom must not stretch each label's glyphs
 	 * to the size of the entire client. The parent still carries its motion. */
-	struct wlr_scene_node *child;
-	wl_list_for_each(child, &scene->children, link)
-		wlr_scene_node_for_each_buffer(child, decoration_snapshot_buffer, tree);
+	return tree;
+}
+
+void mango_bar_decoration_snapshot(MangoBarDecoration *bar,
+								   struct wlr_scene_tree *parent) {
+	if (!bar)
+		return;
+	struct wlr_scene_tree *tree =
+		decoration_snapshot(bar->scene, bar->glass, parent);
+	if (!tree)
+		return;
+	decoration_snapshot_buffer(bar->scene_buffer, bar->buffer, tree);
+	decoration_snapshot_buffer(bar->close_buffer, bar->close_texture, tree);
+}
+
+void mango_jump_label_snapshot(MangoJumpLabel *label,
+							   struct wlr_scene_tree *parent) {
+	if (!label)
+		return;
+	struct wlr_scene_tree *tree =
+		decoration_snapshot(label->scene, label->glass, parent);
+	if (tree)
+		decoration_snapshot_buffer(label->scene_buffer, label->buffer, tree);
 }

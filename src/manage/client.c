@@ -2522,8 +2522,6 @@ void handle_client_unmap(struct wl_listener *listener, void *data) {
 	Monitor *m = NULL;
 	Client *nextfocus = NULL;
 	c->iskilling = 1;
-	if (c->tab_prev || c->tab_next)
-		tab_detach_client(c);
 	switcher_remove_client(c);
 	struct ScrollerStackNode *target_node =
 		c->mon ? find_scroller_node(
@@ -2537,6 +2535,9 @@ void handle_client_unmap(struct wl_listener *listener, void *data) {
 	if (config.animations && !client_is_parked(c) && !c->is_clip_to_hide &&
 		!c->isminimized && (!c->mon || VISIBLEON(c, c->mon)))
 		init_fadeout_client(c);
+	/* Retain the visible strip before detaching disables its scene nodes. */
+	if (c->tab_prev || c->tab_next)
+		tab_detach_client(c);
 
 	// If the client is in a stack, remove it from the stack
 
@@ -2980,7 +2981,8 @@ void client_focus(Client *c, int32_t lift) {
 		if (last_focus_client && last_focus_client != c)
 			mango_jump_label_node_set_focus(last_focus_client->jump_label_node,
 											false);
-		mango_jump_label_node_set_focus(c->jump_label_node, true);
+		mango_jump_label_node_set_focus(c->jump_label_node,
+										config.jumplabeldata.glass);
 
 		tab_sync_focus(c);
 

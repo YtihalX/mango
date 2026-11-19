@@ -71,6 +71,9 @@ With glass enabled, background/focused-background/border colours and border
 width are ignored; text colours and padding still apply. Turning glass off
 restores the original solid decoration. Glass moves with its decoration and
 fades with the window during open and close animations.
+The full tab and group-entry padding remains clickable with glass enabled.
+Close snapshots retain the decoration's text and close-button image together
+with its glass; disabling jump-label glass also retains upstream solid colours.
 
 Jump hints each need a small backdrop pass when their region changes, not on
 idle frames. If many hints become expensive, share their blur pass rather than
