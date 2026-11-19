@@ -2,12 +2,15 @@
 #include "mango/common/scene_node.h"
 #include "mango/common/server.h"
 #include "mango/common/util.h"
+#include "mango/config/parse.h"
 #include "mango/input/device.h"
 #include "mango/input/keyboard.h"
 #include "mango/manage/client.h"
+#include "mango/manage/layer.h"
 #include "mango/manage/monitor.h"
 
 #include <assert.h>
+#include <scenefx/types/wlr_scene.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_output_layout.h>
@@ -296,16 +299,50 @@ void handle_input_method_destroy(struct wl_listener *listener, void *data) {
 void handle_popup_surface_destroy(struct wl_listener *listener, void *data) {
 	struct mango_input_method_popup *popup =
 		wl_container_of(listener, popup, destroy);
+	// The glass goes with the tree
 	wlr_scene_node_destroy(&popup->tree->node);
 	wl_list_remove(&popup->destroy.link);
 	wl_list_remove(&popup->commit.link);
 	wl_list_remove(&popup->link);
 	free(popup);
 }
+
+/*
+ * Puts glass under an input method's popup, such as fcitx5's candidate
+ * panel, when im_popup_glass asks for it and the popup leaves its middle
+ * translucent. It has no window geometry, so the glass takes its whole
+ * surface: a theme for it draws no shadow.
+ */
+static void update_popup_glass(struct mango_input_method_popup *popup) {
+	struct wlr_surface *surface = popup->popup_surface->surface;
+	int32_t width = surface->current.width, height = surface->current.height;
+	if (!config.blur || !config.im_popup_glass || width <= 0 || height <= 0 ||
+		!surface_is_translucent_at(surface, width / 2, height / 2)) {
+		if (popup->glass)
+			wlr_scene_node_set_enabled(&popup->glass->node, false);
+		return;
+	}
+
+	if (!popup->glass) {
+		popup->glass = wlr_scene_blur_create(popup->tree, 0, 0);
+		if (!popup->glass)
+			return;
+		wlr_scene_node_lower_to_bottom(&popup->glass->node);
+		wlr_scene_blur_set_glass(popup->glass, true);
+	}
+	int32_t radius = MANGO_MIN(config.im_popup_glass_radius,
+							   MANGO_MIN(width, height) / 2);
+	wlr_scene_blur_set_size(popup->glass, width, height);
+	wlr_scene_blur_set_corner_radius(popup->glass, radius);
+	wlr_scene_node_set_enabled(&popup->glass->node, true);
+}
+
+// Every commit: the buffer, opaque region or size may have changed
 void handle_popup_surface_commit(struct wl_listener *listener, void *data) {
 	struct mango_input_method_popup *popup =
 		wl_container_of(listener, popup, commit);
 	update_popup_position(popup);
+	update_popup_glass(popup);
 }
 
 void handle_input_method_new_popup_surface(struct wl_listener *listener,

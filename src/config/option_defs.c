@@ -197,6 +197,10 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 		config->blur = atoi(value);
 	} else if (strcmp(key, "blur_layer") == 0) {
 		config->blur_layer = atoi(value);
+	} else if (strcmp(key, "im_popup_glass") == 0) {
+		config->im_popup_glass = atoi(value);
+	} else if (strcmp(key, "im_popup_glass_radius") == 0) {
+		config->im_popup_glass_radius = atoi(value);
 	} else if (strcmp(key, "blur_optimized") == 0) {
 		config->blur_optimized = atoi(value);
 	} else if (strcmp(key, "border_radius") == 0) {
@@ -2620,6 +2624,8 @@ void set_value_default() {
 
 	config.blur = 0;
 	config.blur_layer = 0;
+	config.im_popup_glass = 0;
+	config.im_popup_glass_radius = 12;
 	config.blur_optimized = 1;
 	config.border_radius = 0;
 	config.blur_params.num_passes = 1;
@@ -3020,6 +3026,9 @@ void override_config(void) {
 	config.smartgaps = CLAMP_INT(config.smartgaps, 0, 1);
 	config.blur = CLAMP_INT(config.blur, 0, 1);
 	config.blur_layer = CLAMP_INT(config.blur_layer, 0, 1);
+	config.im_popup_glass = CLAMP_INT(config.im_popup_glass, 0, 1);
+	config.im_popup_glass_radius =
+		CLAMP_INT(config.im_popup_glass_radius, 0, 10000);
 	config.blur_optimized = CLAMP_INT(config.blur_optimized, 0, 1);
 	config.border_radius = CLAMP_INT(config.border_radius, 0, 100);
 	config.blur_params.num_passes =

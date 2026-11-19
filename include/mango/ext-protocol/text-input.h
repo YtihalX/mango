@@ -35,6 +35,8 @@ struct mango_input_method_popup {
 	struct wlr_input_popup_surface_v2 *popup_surface;
 	struct wlr_scene_tree *tree;
 	struct wlr_scene_tree *scene_surface;
+	// Under the surface in `tree`, made once im_popup_glass asks for it
+	struct wlr_scene_blur *glass;
 	struct mango_input_method_relay *relay;
 	struct wl_list link;
 

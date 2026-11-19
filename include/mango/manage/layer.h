@@ -70,6 +70,9 @@ void handle_layer_surface_map(struct wl_listener *listener, void *data);
 void handle_layer_surface_commit(struct wl_listener *listener, void *data);
 /* Reads the popup_glass keys of the layer rules that match the layer. */
 void layer_apply_popup_glass_rules(LayerSurface *l);
+/* Whether a popup leaves (x, y), in surface coordinates, unpainted. */
+bool surface_is_translucent_at(struct wlr_surface *surface, int32_t x,
+							   int32_t y);
 bool popup_unconstrain(Popup *popup);
 void handle_popup_destroy(struct wl_listener *listener, void *data);
 void handle_popup_commit(struct wl_listener *listener, void *data);

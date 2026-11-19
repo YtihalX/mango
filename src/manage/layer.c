@@ -481,23 +481,28 @@ static bool popup_glass_rule(struct wlr_xdg_popup *wlr_popup, int32_t *radius) {
 }
 
 /*
- * Glass shows wherever a popup is not painted, so only menus that leave
- * themselves translucent get it. Menus and popovers take a grab, tooltips
- * don't. A solid popup's opaque region covers the middle of its window
- * geometry: GTK4 trims its corners from it by more than a glass radius along
- * one side, GTK3 rounds them, and a translucent menu sends none.
+ * Glass shows wherever a popup is not painted, so only popups that leave
+ * themselves translucent get it. A solid popup's opaque region covers its
+ * middle: GTK4 trims its corners from it by more than a glass radius along
+ * one side, GTK3 rounds them, and a translucent popup sends none.
  */
+bool surface_is_translucent_at(struct wlr_surface *surface, int32_t x,
+							   int32_t y) {
+	if (!surface->mapped || !surface->buffer ||
+		wlr_buffer_is_opaque(&surface->buffer->base))
+		return false;
+	return !pixman_region32_contains_point(&surface->opaque_region, x, y,
+										   NULL);
+}
+
+/* Menus and popovers take a grab, tooltips don't. */
 static bool popup_is_translucent_menu(struct wlr_xdg_popup *wlr_popup) {
-	struct wlr_surface *surface = wlr_popup->base->surface;
 	const struct wlr_box *geometry = &wlr_popup->base->geometry;
-	if (!wlr_popup->seat || !surface->mapped || !surface->buffer ||
-		wlr_box_empty(geometry))
+	if (!wlr_popup->seat || wlr_box_empty(geometry))
 		return false;
-	if (wlr_buffer_is_opaque(&surface->buffer->base))
-		return false;
-	return !pixman_region32_contains_point(
-		&surface->opaque_region, geometry->x + geometry->width / 2,
-		geometry->y + geometry->height / 2, NULL);
+	return surface_is_translucent_at(wlr_popup->base->surface,
+									 geometry->x + geometry->width / 2,
+									 geometry->y + geometry->height / 2);
 }
 
 static void handle_popup_glass_destroy(struct wl_listener *listener,

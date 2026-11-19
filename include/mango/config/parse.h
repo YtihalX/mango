@@ -474,6 +474,8 @@ typedef struct {
 	int32_t blur;
 	int32_t blur_layer;
 	int32_t blur_optimized;
+	int32_t im_popup_glass;
+	int32_t im_popup_glass_radius;
 	int32_t border_radius;
 	struct blur_data blur_params;
 	struct glass_data glass_params;

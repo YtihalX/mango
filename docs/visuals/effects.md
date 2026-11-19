@@ -11,6 +11,8 @@ Blur creates a frosted glass effect for transparent windows.
 | :--- | :--- | :--- |
 | `blur` | `0` | Enable blur for windows. |
 | `blur_layer` | `0` | Enable blur for layer surfaces (like bars/docks). |
+| `im_popup_glass` | `0` | Liquid glass under an input method's popup, such as fcitx5's candidate panel, over its whole surface, when the popup leaves its middle translucent. Its theme draws no shadow. Requires `blur=1`. |
+| `im_popup_glass_radius` | `12` | Corner radius of that glass. |
 | `blur_optimized` | `1` | Caches the wallpaper and blur background, significantly reducing GPU usage. Disabling it will significantly increase GPU consumption and may cause rendering lag. **Highly recommended.** |
 | `blur_params_radius` | `5` | The strength (radius) of the blur. |
 | `blur_params_num_passes` | `1` | Number of passes. Higher = smoother but more expensive. |
