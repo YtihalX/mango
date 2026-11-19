@@ -14,6 +14,7 @@
 #endif
 
 typedef struct {
+	int32_t glass;
 	float fg_color[4];
 	float bg_color[4];
 	float focus_fg_color[4];
@@ -41,6 +42,8 @@ struct mango_text_measure {
 
 typedef struct MangoJumpLabel {
 	struct wlr_scene_tree *scene;
+	struct wlr_scene_blur *glass;
+	bool use_glass;
 	struct wlr_scene_rect *border;
 	struct wlr_scene_rect *bg;
 	struct wlr_scene_buffer *scene_buffer;
@@ -78,6 +81,8 @@ typedef struct MangoBarDecoration {
 	uint32_t type;
 	bool is_tab;
 	struct wlr_scene_tree *scene;
+	struct wlr_scene_blur *glass;
+	bool use_glass;
 	struct wlr_scene_rect *border;
 	struct wlr_scene_rect *bg;
 	struct wlr_scene_buffer *scene_buffer;
@@ -180,4 +185,10 @@ void mango_jump_label_node_apply_config(MangoJumpLabel *node,
 										const DecorateDrawData *data);
 void mango_bar_decoration_apply_config(MangoBarDecoration *node,
 									   const DecorateDrawData *data);
+
+/* Decoration snapshots keep their natural size while the window closes. */
+void mango_decoration_snapshot(struct wlr_scene_tree *scene,
+							   struct wlr_scene_blur *glass,
+							   struct wlr_scene_tree *parent);
+void mango_decorations_set_opacity(struct wlr_scene_node *node, float opacity);
 #endif // jump_label_node_H

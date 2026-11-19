@@ -54,6 +54,28 @@ You can also color-code windows based on their state:
 
 > **Tip:** For scratchpad window sizing, see [Scratchpad](/docs/window-management/scratchpad) configuration.
 
+### Glass Decorations
+
+| Setting | Default | Description |
+| :--- | :--- | :--- |
+| `title_message_bar_decorate_glass` | `0` | Glass under the overview and switcher title bar. |
+| `tab_bar_decorate_glass` | `0` | Glass under each auto-tab entry, with a lens on the focused tab. |
+| `group_bar_decorate_glass` | `0` | Glass under each group entry, with a lens on the focused member. |
+| `jump_label_decorate_glass` | `0` | Glass under every jump hint, with a lens on the current target. |
+
+Each switch accepts `0` or `1` and applies to existing decorations on reload.
+Glass uses the global blur and `glass_*` slab/lens settings, refracts whatever
+is behind the decoration, and follows its existing `*_decorate_corner_radius`.
+The lens is inset by `*_decorate_padding_x` and `*_decorate_padding_y`.
+With glass enabled, background/focused-background/border colours and border
+width are ignored; text colours and padding still apply. Turning glass off
+restores the original solid decoration. Glass moves with its decoration and
+fades with the window during open and close animations.
+
+Jump hints each need a small backdrop pass when their region changes, not on
+idle frames. If many hints become expensive, share their blur pass rather than
+removing glass from labels.
+
 ### Overview Jump Mode
 | Setting | Default | Description |
 | :--- | :--- | :--- |

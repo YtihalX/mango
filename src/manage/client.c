@@ -2977,6 +2977,10 @@ void client_focus(Client *c, int32_t lift) {
 		server.selected_monitor->prevsel = server.selected_monitor->sel;
 		server.selected_monitor->sel = c;
 		c->isfocusing = true;
+		if (last_focus_client && last_focus_client != c)
+			mango_jump_label_node_set_focus(last_focus_client->jump_label_node,
+											false);
+		mango_jump_label_node_set_focus(c->jump_label_node, true);
 
 		tab_sync_focus(c);
 

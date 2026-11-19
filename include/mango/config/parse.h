@@ -599,6 +599,7 @@ typedef struct {
 
 	struct xkb_context *ctx;
 	struct xkb_keymap *keymap;
+	/* Each family's *_decorate_glass switch is stored with its draw style. */
 	DecorateDrawData jumplabeldata;
 	DecorateDrawData groupbardata;
 	DecorateDrawData tabbardata;

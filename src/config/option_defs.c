@@ -606,6 +606,14 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 		if (config->cursor_theme)
 			free(config->cursor_theme);
 		config->cursor_theme = strdup(value);
+	} else if (strcmp(key, "title_message_bar_decorate_glass") == 0) {
+		config->title_message_bardata.glass = CLAMP_INT(atoi(value), 0, 1);
+	} else if (strcmp(key, "tab_bar_decorate_glass") == 0) {
+		config->tabbardata.glass = CLAMP_INT(atoi(value), 0, 1);
+	} else if (strcmp(key, "group_bar_decorate_glass") == 0) {
+		config->groupbardata.glass = CLAMP_INT(atoi(value), 0, 1);
+	} else if (strcmp(key, "jump_label_decorate_glass") == 0) {
+		config->jumplabeldata.glass = CLAMP_INT(atoi(value), 0, 1);
 	} else if (strcmp(key, "group_bar_decorate_font_desc") == 0) {
 		if (config->groupbardata.font_desc)
 			free((void *)config->groupbardata.font_desc);
@@ -2635,6 +2643,10 @@ void set_value_default() {
 	config.blur_params.contrast = 0.9f;
 	config.blur_params.saturation = 1.2f;
 	config.glass_params = glass_data_get_default();
+	config.title_message_bardata.glass = 0;
+	config.tabbardata.glass = 0;
+	config.groupbardata.glass = 0;
+	config.jumplabeldata.glass = 0;
 	config.shadows = 0;
 	config.shadow_only_floating = 1;
 	config.layer_shadows = 0;

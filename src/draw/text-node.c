@@ -1,5 +1,6 @@
 #include "mango/draw/text-node.h"
 #include "mango/common/scene_node.h"
+#include "mango/manage/client.h"
 
 #include <cairo.h>
 #include <drm_fourcc.h>
@@ -428,6 +429,42 @@ static void text_node_clear(struct wlr_scene_buffer *scene_buffer,
 #endif
 }
 
+static void decoration_glass_update(struct wlr_scene_blur **glass,
+									struct wlr_scene_tree *scene, bool enabled,
+									int32_t width, int32_t height, int32_t radius,
+									int32_t pad_x, int32_t pad_y, bool focused) {
+	if (!enabled) {
+		if (*glass) {
+			wlr_scene_node_destroy(&(*glass)->node);
+			*glass = NULL;
+		}
+		return;
+	}
+	if (!*glass) {
+		*glass = wlr_scene_blur_create(scene, 0, 0);
+		if (!*glass)
+			return;
+		wlr_scene_blur_set_glass(*glass, true);
+		wlr_scene_blur_set_should_only_blur_bottom_layer(*glass, false);
+		wlr_scene_node_lower_to_bottom(&(*glass)->node);
+	}
+	int32_t limit = (width < height ? width : height) / 2;
+	radius = radius < 0 || radius > limit ? limit : radius;
+	wlr_scene_blur_set_size(*glass, width, height);
+	wlr_scene_blur_set_corner_radius(*glass, radius);
+	wlr_scene_node_set_enabled(&(*glass)->node, width > 0 && height > 0);
+	struct wlr_box lens = {
+		.x = pad_x,
+		.y = pad_y,
+		.width = width - 2 * pad_x,
+		.height = height - 2 * pad_y,
+	};
+	int32_t inset = pad_x < pad_y ? pad_x : pad_y;
+	wlr_scene_blur_set_glass_lens(*glass,
+		focused && lens.width > 0 && lens.height > 0 ? &lens : NULL,
+		radius > inset ? radius - inset : 0, NULL);
+}
+
 MangoJumpLabel *mango_jump_label_node_create(struct wlr_scene_tree *parent,
 											 DecorateDrawData data) {
 	MangoJumpLabel *node = calloc(1, sizeof(*node));
@@ -457,6 +494,9 @@ MangoJumpLabel *mango_jump_label_node_create(struct wlr_scene_tree *parent,
 		   sizeof(node->focus_bg_color));
 	memcpy(node->border_color, data.border_color, sizeof(node->border_color));
 	node->border_width = data.border_width;
+	node->use_glass = data.glass;
+	decoration_glass_update(&node->glass, node->scene, node->use_glass,
+						   0, 0, node->corner_radius, 0, 0, false);
 	node->corner_radius = data.corner_radius;
 	node->padding_x = data.padding_x;
 	node->padding_y = data.padding_y;
@@ -502,12 +542,15 @@ static void jump_label_apply_geometry(MangoJumpLabel *node) {
 	if (node->text_logical_w <= 0 || node->text_logical_h <= 0) {
 		wlr_scene_rect_set_size(node->border, 0, 0);
 		wlr_scene_rect_set_size(node->bg, 0, 0);
+		if (node->glass)
+			wlr_scene_node_set_enabled(&node->glass->node, false);
 		node->logical_width = 0;
 		node->logical_height = 0;
 		return;
 	}
 
-	int32_t border = node->border_width > 0 ? node->border_width : 0;
+	int32_t border = !node->use_glass && node->border_width > 0
+						 ? node->border_width : 0;
 	int32_t width = node->text_logical_w + 2 * node->padding_x + 2 * border;
 	int32_t height = node->text_logical_h + 2 * node->padding_y + 2 * border;
 
@@ -519,6 +562,11 @@ static void jump_label_apply_geometry(MangoJumpLabel *node) {
 	rect_apply(node->bg, node->focused ? node->focus_bg_color : node->bg_color,
 			   node->corner_radius, border, border, width - 2 * border,
 			   height - 2 * border);
+	wlr_scene_node_set_enabled(&node->border->node, !node->use_glass);
+	wlr_scene_node_set_enabled(&node->bg->node, !node->use_glass);
+	decoration_glass_update(&node->glass, node->scene, node->use_glass,
+						   width, height, node->corner_radius,
+						   node->padding_x, node->padding_y, node->focused);
 
 	wlr_scene_node_set_position(&node->scene_buffer->node,
 								border + node->padding_x,
@@ -544,8 +592,10 @@ void mango_jump_label_node_update(MangoJumpLabel *node, const char *text,
 		node->cached_focused != node->focused;
 
 	if (dirty) {
+		char *cached_text = g_strdup(text);
 		g_free(node->cached_text);
-		node->cached_text = g_strdup(text);
+		node->cached_text = cached_text;
+		text = cached_text;
 		g_free(node->cached_font_desc);
 		node->cached_font_desc = g_strdup(node->font_desc);
 		node->cached_scale = scale;
@@ -657,6 +707,10 @@ MangoBarDecoration *mango_bar_decoration_create(void *cdata, uint32_t type,
 		   sizeof(mangobar->border_color));
 	mangobar->border_width = data.border_width;
 	mangobar->corner_radius = data.corner_radius;
+	mangobar->use_glass = data.glass;
+	decoration_glass_update(&mangobar->glass, mangobar->scene,
+						   mangobar->use_glass, 0, 0,
+						   mangobar->corner_radius, 0, 0, false);
 	mangobar->padding_x = data.padding_x;
 	mangobar->padding_y = data.padding_y;
 	mangobar->font_desc =
@@ -714,13 +768,15 @@ void mango_bar_decoration_destroy(MangoBarDecoration *node) {
 }
 
 static int32_t bar_decoration_avail_width(MangoBarDecoration *node) {
-	int32_t border = node->border_width > 0 ? node->border_width : 0;
+	int32_t border = !node->use_glass && node->border_width > 0
+						 ? node->border_width : 0;
 	int32_t avail = node->target_width - 2 * border - 2 * node->padding_x;
 	return avail > 0 ? avail : 0;
 }
 
 static void bar_decoration_apply_geometry(MangoBarDecoration *node) {
-	int32_t border = node->border_width > 0 ? node->border_width : 0;
+	int32_t border = !node->use_glass && node->border_width > 0
+						 ? node->border_width : 0;
 	int32_t width = node->target_width > 0 ? node->target_width : 0;
 	int32_t height = node->target_height > 0 ? node->target_height : 0;
 	int32_t inner_w = width - 2 * border;
@@ -731,6 +787,8 @@ static void bar_decoration_apply_geometry(MangoBarDecoration *node) {
 	if (avail_w <= 0 || avail_h <= 0) {
 		text_node_clear(node->scene_buffer, &node->buffer, node->border,
 						node->bg);
+		if (node->glass)
+			wlr_scene_node_set_enabled(&node->glass->node, false);
 		node->cached_scale = -1.0f;
 		node->cached_clip_pixel_w = -1;
 		node->text_logical_w = 0;
@@ -744,6 +802,12 @@ static void bar_decoration_apply_geometry(MangoBarDecoration *node) {
 					  node->corner_radius, border, width, height);
 	rect_apply(node->bg, node->focused ? node->focus_bg_color : node->bg_color,
 			   node->corner_radius, border, border, inner_w, inner_h);
+	wlr_scene_node_set_enabled(&node->border->node, !node->use_glass);
+	wlr_scene_node_set_enabled(&node->bg->node, !node->use_glass);
+	decoration_glass_update(&node->glass, node->scene, node->use_glass,
+						   width, height, node->corner_radius,
+						   node->padding_x, node->padding_y,
+						   node->focused && node->type != TitleMessageBar);
 
 	node->logical_width = width;
 	node->logical_height = height;
@@ -1080,6 +1144,11 @@ void mango_jump_label_node_apply_config(MangoJumpLabel *node,
 	node->corner_radius = data->corner_radius;
 	node->padding_x = data->padding_x;
 	node->padding_y = data->padding_y;
+	node->use_glass = data->glass;
+	decoration_glass_update(&node->glass, node->scene, node->use_glass,
+						   node->logical_width, node->logical_height,
+						   node->corner_radius, node->padding_x,
+						   node->padding_y, node->focused);
 
 	g_free(node->font_desc);
 	node->font_desc =
@@ -1108,6 +1177,12 @@ void mango_bar_decoration_apply_config(MangoBarDecoration *node,
 	node->corner_radius = data->corner_radius;
 	node->padding_x = data->padding_x;
 	node->padding_y = data->padding_y;
+	node->use_glass = data->glass;
+	decoration_glass_update(&node->glass, node->scene, node->use_glass,
+						   node->target_width, node->target_height,
+						   node->corner_radius, node->padding_x,
+						   node->padding_y,
+						   node->focused && node->type != TitleMessageBar);
 
 	g_free(node->font_desc);
 	node->font_desc =
@@ -1117,4 +1192,62 @@ void mango_bar_decoration_apply_config(MangoBarDecoration *node,
 		float scale = node->last_scale > 0.0f ? node->last_scale : 1.0f;
 		mango_bar_decoration_update(node, node->last_text, scale);
 	}
+}
+
+void mango_decorations_set_opacity(struct wlr_scene_node *node, float opacity) {
+	if (!node)
+		return;
+	if (node->type == WLR_SCENE_NODE_BLUR) {
+		struct wlr_scene_blur *blur = wlr_scene_blur_from_node(node);
+		wlr_scene_blur_set_strength(blur, opacity);
+		wlr_scene_blur_set_alpha(blur, opacity);
+	} else if (node->type == WLR_SCENE_NODE_TREE) {
+		struct wlr_scene_tree *tree = wlr_scene_tree_from_node(node);
+		struct wlr_scene_node *child;
+		wl_list_for_each(child, &tree->children, link)
+			mango_decorations_set_opacity(child, opacity);
+	}
+}
+
+static void decoration_snapshot_buffer(struct wlr_scene_buffer *buffer,
+									  int32_t x, int32_t y, void *data) {
+	struct wlr_scene_buffer *copy = wlr_scene_buffer_create(data, buffer->buffer);
+	if (!copy)
+		return;
+	wlr_scene_node_set_position(&copy->node, x, y);
+	wlr_scene_buffer_set_dest_size(copy, buffer->dst_width, buffer->dst_height);
+	wlr_scene_buffer_set_source_box(copy, &buffer->src_box);
+	wlr_scene_buffer_set_opacity(copy, buffer->opacity);
+}
+
+void mango_decoration_snapshot(struct wlr_scene_tree *scene,
+							   struct wlr_scene_blur *source,
+							   struct wlr_scene_tree *parent) {
+	if (!source || !scene->node.enabled)
+		return;
+	int32_t x, y;
+	if (!wlr_scene_node_coords(&scene->node, &x, &y))
+		return;
+	struct wlr_scene_tree *tree = wlr_scene_tree_create(parent);
+	if (!tree)
+		return;
+	wlr_scene_node_set_position(&tree->node, x, y);
+	struct wlr_scene_blur *glass =
+		wlr_scene_blur_create(tree, source->width, source->height);
+	if (!glass) {
+		wlr_scene_node_destroy(&tree->node);
+		return;
+	}
+	wlr_scene_blur_set_glass(glass, true);
+	wlr_scene_blur_set_should_only_blur_bottom_layer(glass, false);
+	wlr_scene_blur_set_corner_radii(glass, source->corners);
+	wlr_scene_blur_set_strength(glass, source->strength);
+	wlr_scene_blur_set_alpha(glass, source->alpha);
+	wlr_scene_blur_set_glass_lens(glass, &source->glass_lens,
+								source->glass_lens_radius, &source->glass_lens_clip);
+	/* No Snapshot payload: window zoom must not stretch each label's glyphs
+	 * to the size of the entire client. The parent still carries its motion. */
+	struct wlr_scene_node *child;
+	wl_list_for_each(child, &scene->children, link)
+		wlr_scene_node_for_each_buffer(child, decoration_snapshot_buffer, tree);
 }

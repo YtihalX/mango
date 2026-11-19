@@ -1299,6 +1299,8 @@ void fadeout_client_animation_next_tick(Client *c) {
 		wlr_scene_blur_set_strength(c->blur, opacity);
 		wlr_scene_blur_set_alpha(c->blur, opacity);
 	}
+	if (config.animation_fade_out && !c->no_fade_out)
+		mango_decorations_set_opacity(&c->scene->node, opacity);
 
 	if (c->mon) {
 		bool scaling = client_close_animation_type(c) == ANIM_TYPE_ZOOM;
@@ -1422,6 +1424,27 @@ void init_fadeout_client(Client *c) {
 	} else {
 		fadeout_client->scene =
 			wlr_scene_tree_snapshot(&c->scene->node, server.layers[LyrFadeOut]);
+	}
+	if (fadeout_client->scene) {
+		/* Bars live alongside the window tree, so the surface snapshot alone
+		 * cannot retain them when the real client is destroyed. */
+		Client *head = c;
+		while (head->group_prev)
+			head = head->group_prev;
+		for (Client *it = head; it; it = it->group_next)
+			if (it->group_bar)
+				mango_decoration_snapshot(it->group_bar->scene,
+					it->group_bar->glass, fadeout_client->scene);
+		head = c;
+		while (head->tab_prev)
+			head = head->tab_prev;
+		for (Client *it = head; it; it = it->tab_next)
+			if (it->tab_bar)
+				mango_decoration_snapshot(it->tab_bar->scene,
+					it->tab_bar->glass, fadeout_client->scene);
+		if (c->jump_label_node)
+			mango_decoration_snapshot(c->jump_label_node->scene,
+				c->jump_label_node->glass, fadeout_client->scene);
 	}
 	c->snapshot_temp_visible = false;
 	client_update_visibility(c);
@@ -1858,7 +1881,29 @@ void client_set_focused_opacity_animation(Client *c) {
 	client_start_focus_animation(c, true);
 }
 
+static void client_decorations_set_opacity(Client *c, float opacity) {
+	/* A hidden tab must not overwrite the visible strip's opening fade. */
+	if (c->is_tab_hidden)
+		return;
+	Client *head = c;
+	while (head->group_prev)
+		head = head->group_prev;
+	for (Client *it = head; it; it = it->group_next)
+		if (it->group_bar)
+			mango_decorations_set_opacity(&it->group_bar->scene->node, opacity);
+	head = c;
+	while (head->tab_prev)
+		head = head->tab_prev;
+	for (Client *it = head; it; it = it->tab_next)
+		if (it->tab_bar)
+			mango_decorations_set_opacity(&it->tab_bar->scene->node, opacity);
+	if (c->jump_label_node)
+		mango_decorations_set_opacity(&c->jump_label_node->scene->node, opacity);
+}
+
 bool client_set_focus_opacity(Client *c) {
+	if (!c->animation.running || c->animation.action != OPEN)
+		client_decorations_set_opacity(c, 1.0f);
 	if (config.blur && (!c->no_blur || c->blur->glass) &&
 		c->blur_opacity != 1.0f && c->animation.action != OPEN) {
 		c->blur_opacity = 1.0f;
@@ -1920,6 +1965,9 @@ bool client_set_focus_opacity(Client *c) {
 
 		c->opacity_animation.current_opacity = target_opacity;
 		client_set_opacity(c, target_opacity);
+		client_decorations_set_opacity(c,
+			MIN(percent * (1.0 - config.fadein_begin_opacity) +
+				config.fadein_begin_opacity, 1.0));
 		if (config.blur && (!c->no_blur || c->blur->glass) &&
 			!client_blur_uses_wallpaper(c)) {
 			float blur_val = MIN(percent * (1.0 - config.fadein_begin_opacity) +
