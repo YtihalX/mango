@@ -45,6 +45,7 @@ struct switcher_state {
 	Monitor *mon;
 	struct wlr_scene_tree *tree;
 	struct wlr_scene_rect *bg;
+	struct switcher_motion *motion;
 	struct switcher_tile **tiles;
 	int count;
 	int index;

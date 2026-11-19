@@ -523,6 +523,8 @@ typedef struct {
 	float splitcolor[4];
 	float focuscolor[4];
 	float switcher_highlight_color[4]; // Negative alpha inherits focuscolor.
+	int switcher_glass;
+	int switcher_glass_radius;
 	float maximizescreencolor[4];
 	float urgentcolor[4];
 	float scratchpadcolor[4];

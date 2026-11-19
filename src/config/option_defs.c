@@ -1094,6 +1094,10 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 		} else {
 			convert_hex_to_rgba(config->focuscolor, color);
 		}
+	} else if (strcmp(key, "switcher_glass") == 0) {
+		config->switcher_glass = atoi(value);
+	} else if (strcmp(key, "switcher_glass_radius") == 0) {
+		config->switcher_glass_radius = atoi(value);
 	} else if (strcmp(key, "switcher_highlight_color") == 0) {
 		int64_t color = parse_color(value);
 		if (color == -1) {
@@ -2800,6 +2804,8 @@ void set_value_default() {
 	config.focuscolor[2] = 0x25 / 255.0f;
 	config.focuscolor[3] = 1.0f;
 	config.switcher_highlight_color[3] = -1.0f;
+	config.switcher_glass = 0;
+	config.switcher_glass_radius = 22;
 	config.maximizescreencolor[0] = 0x89 / 255.0f;
 	config.maximizescreencolor[1] = 0xaa / 255.0f;
 	config.maximizescreencolor[2] = 0x61 / 255.0f;
@@ -3041,6 +3047,9 @@ void override_config(void) {
 	config.im_popup_glass = CLAMP_INT(config.im_popup_glass, 0, 1);
 	config.im_popup_glass_radius =
 		CLAMP_INT(config.im_popup_glass_radius, 0, 10000);
+	config.switcher_glass = CLAMP_INT(config.switcher_glass, 0, 1);
+	config.switcher_glass_radius =
+		CLAMP_INT(config.switcher_glass_radius, 0, 10000);
 	config.blur_optimized = CLAMP_INT(config.blur_optimized, 0, 1);
 	config.border_radius = CLAMP_INT(config.border_radius, 0, 100);
 	config.blur_params.num_passes =

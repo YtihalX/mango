@@ -200,12 +200,23 @@ bind=SUPER+CTRL+ALT+SHIFT,grave,switcher,all_prev
 
 ### Configuration
 
-The switcher has no dedicated size or layout options. Its focused thumbnail
-frame uses `focus_color`, other thumbnail frames use `border_color`, and it
-shares the title message bar with overcircle.
+The switcher has no dedicated size or layout options. With glass disabled its
+focused thumbnail frame uses `switcher_highlight_color` (or `focus_color` when
+unset), and other frames use `border_color`. With glass enabled one rounded
+slab covers every row, thumbnails keep `border_radius`, and a lens marks the
+chosen tile. The slab and lens use the global glass and blur settings.
+
+Glass expands from the panel centre using the open duration and curve. Releasing
+the modifier focuses the chosen window immediately, while the panel and title
+shrink using the close duration and curve. Releasing during the open reverses
+from its current size; another Alt+Tab can open above the closing panel.
+The shared title message bar's glass is controlled independently by
+`title_message_bar_decorate_glass`.
 
 | Setting | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
+| `switcher_glass` | boolean | `0` | Replace the solid panel and filled frames with glass and a selection lens. |
+| `switcher_glass_radius` | integer | `22` | Glass panel corner radius. |
 | `title_message_bar_height` | integer | `52` | Height of the highlighted window's title message bar. Set to `0` to disable it. |
 | `title_message_bar_gap` | integer | `20` | Gap between the switcher panel and its title message bar. |
 | `focus_color` | color | `0xc66b25ff` | Frame color of the highlighted thumbnail. |

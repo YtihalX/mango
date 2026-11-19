@@ -1,7 +1,10 @@
 #include "mango/switcher/switcher.h"
+#include "mango/animation/common.h"
+#include "mango/common/scene_node.h"
 #include "mango/common/server.h"
 #include "mango/common/util.h"
 #include "mango/draw/title-message-bar.h"
+#include "mango/draw/text-node.h"
 #include "mango/manage/client.h"
 #include "mango/manage/monitor.h"
 #include <scenefx/types/wlr_scene.h>
@@ -16,6 +19,178 @@
 #include <wlr/types/wlr_xdg_shell.h>
 
 static struct switcher_state switcher_state;
+
+/* Closing panels own only snapshots, never clients or the active switcher. */
+struct switcher_motion {
+	struct wlr_scene_tree *tree, *title;
+	struct wlr_scene_blur *glass, *title_glass;
+	struct {
+		struct wlr_scene_rect *rect;
+		struct wlr_box final;
+		float color[4];
+	} title_rects[2];
+	int title_rect_count;
+	struct wl_event_source *timer;
+	struct wl_listener output_destroy;
+	struct wlr_box final, current, title_box, lens;
+	struct timespec started;
+	double progress, close_start;
+	bool closing;
+};
+
+static void switcher_motion_apply(struct switcher_motion *motion);
+
+static void switcher_motion_destroy(struct switcher_motion *motion) {
+	if (motion->timer)
+		wl_event_source_remove(motion->timer);
+	wl_list_remove(&motion->output_destroy.link);
+	if (motion->title)
+		wlr_scene_node_destroy(&motion->title->node);
+	if (motion->tree)
+		wlr_scene_node_destroy(&motion->tree->node);
+	free(motion);
+}
+
+static void switcher_motion_output_destroy(struct wl_listener *listener,
+										   void *data) {
+	struct switcher_motion *motion =
+		wl_container_of(listener, motion, output_destroy);
+	if (switcher_state.motion == motion) {
+		/* The output is disappearing: leave no timer referring to its monitor. */
+		switcher_state.motion = NULL;
+		switcher_close();
+		motion->tree = NULL;
+	}
+	switcher_motion_destroy(motion);
+}
+
+static int switcher_motion_tick(void *data) {
+	struct switcher_motion *motion = data;
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	double elapsed = (now.tv_sec - motion->started.tv_sec) * 1000.0 +
+					 (now.tv_nsec - motion->started.tv_nsec) / 1000000.0;
+	int duration = motion->closing ? config.animation_duration_close
+								  : config.animation_duration_open;
+	if (!config.animations)
+		duration = 0;
+	double t = duration > 0 ? MANGO_MIN(elapsed / duration, 1.0) : 1.0;
+	double eased = find_animation_curve_at(t, motion->closing ? CLOSE : OPEN);
+	motion->progress = motion->closing ? motion->close_start * (1.0 - eased)
+									  : eased;
+	if (motion->closing && t >= 1.0) {
+		switcher_motion_destroy(motion);
+		return 0;
+	}
+	switcher_motion_apply(motion);
+	if (t < 1.0)
+		wl_event_source_timer_update(motion->timer, 16);
+	return 0;
+}
+
+static void switcher_title_opacity(struct wlr_scene_tree *tree, double opacity) {
+	struct wlr_scene_node *node;
+	wl_list_for_each(node, &tree->children, link) {
+		if (node->type == WLR_SCENE_NODE_TREE) {
+			switcher_title_opacity(wlr_scene_tree_from_node(node), opacity);
+		} else if (node->type == WLR_SCENE_NODE_BUFFER) {
+			wlr_scene_buffer_set_opacity(wlr_scene_buffer_from_node(node),
+										 opacity);
+		} else if (node->type == WLR_SCENE_NODE_BLUR) {
+			wlr_scene_blur_set_alpha(wlr_scene_blur_from_node(node), opacity);
+		} else if (node->type == WLR_SCENE_NODE_RECT) {
+			struct wlr_scene_rect *rect = wlr_scene_rect_from_node(node);
+			float color[4];
+			memcpy(color, rect->color, sizeof(color));
+			/* Title rects use these two colours; do not compound their alpha. */
+			color[3] = opacity *
+				(rect == switcher_state.mon->title_message_bar->border
+					 ? config.title_message_bardata.border_color[3]
+					 : config.title_message_bardata.focus_bg_color[3]);
+			wlr_scene_rect_set_color(rect, color);
+		}
+	}
+}
+
+static void switcher_snapshot_opacity(struct wlr_scene_buffer *buffer,
+									  int sx, int sy, void *data) {
+	double *opacity = data;
+	wlr_scene_buffer_set_opacity(buffer, *opacity);
+}
+
+static void switcher_title_snapshot_buffer(struct wlr_scene_buffer *buffer,
+										   int sx, int sy, void *data) {
+	/* SceneFX releases uploaded CPU buffers; the decoration still owns its
+	 * text buffer, unlike the generic snapshot's now-empty scene buffer. */
+	struct wlr_buffer *source = data;
+	wlr_scene_buffer_set_buffer(buffer, source);
+}
+
+static void switcher_motion_apply(struct switcher_motion *motion) {
+	double p = MANGO_MAX(0.0, MANGO_MIN(motion->progress, 1.0));
+	double opacity = expand_content_opacity(p);
+	motion->current = expand_box_at(&motion->final,
+		motion->final.x + motion->final.width / 2.0,
+		motion->final.y + motion->final.height / 2.0, p);
+	struct wlr_box *box = &motion->current;
+	int radius = MANGO_MIN(config.switcher_glass_radius,
+						   MANGO_MIN(box->width, box->height) / 2);
+	wlr_scene_node_set_position(&motion->glass->node,
+		box->x - (motion->closing ? 0 : motion->final.x),
+		box->y - (motion->closing ? 0 : motion->final.y));
+	wlr_scene_blur_set_size(motion->glass, box->width, box->height);
+	wlr_scene_blur_set_corner_radius(motion->glass, radius);
+	wlr_scene_blur_set_strength(motion->glass, p);
+	wlr_scene_blur_set_alpha(motion->glass, p);
+	if (motion->closing) {
+		struct wlr_box lens = motion->lens;
+		lens.x -= box->x;
+		lens.y -= box->y;
+		struct wlr_box clip = {0, 0, box->width, box->height};
+		wlr_scene_blur_set_glass_lens(motion->glass, &lens,
+			config.border_radius + SW_PAD, &clip);
+		scene_snapshot_clip_to_box(motion->tree, box, false, 0, 0);
+		wlr_scene_node_for_each_buffer(&motion->tree->node,
+			switcher_snapshot_opacity, &opacity);
+		if (motion->title) {
+			struct wlr_box title = expand_box_at(&motion->title_box,
+				motion->final.x + motion->final.width / 2.0,
+				motion->final.y + motion->final.height / 2.0, p);
+			scene_snapshot_clip_to_box(motion->title, &title, false, 0, 0);
+			wlr_scene_node_for_each_buffer(&motion->title->node,
+				switcher_snapshot_opacity, &opacity);
+			if (motion->title_glass) {
+				wlr_scene_node_set_position(&motion->title_glass->node,
+											title.x, title.y);
+				wlr_scene_blur_set_size(motion->title_glass,
+										title.width, title.height);
+				wlr_scene_blur_set_corner_radius(motion->title_glass,
+					MANGO_MIN(config.title_message_bardata.corner_radius,
+							  MANGO_MIN(title.width, title.height) / 2));
+				wlr_scene_blur_set_alpha(motion->title_glass, opacity);
+			}
+			for (int i = 0; i < motion->title_rect_count; i++) {
+				struct wlr_box rect = expand_box_at(&motion->title_rects[i].final,
+					motion->final.x + motion->final.width / 2.0,
+					motion->final.y + motion->final.height / 2.0, p);
+				struct wlr_scene_rect *node = motion->title_rects[i].rect;
+				wlr_scene_node_set_position(&node->node, rect.x, rect.y);
+				wlr_scene_rect_set_size(node, rect.width, rect.height);
+				float color[4];
+				memcpy(color, motion->title_rects[i].color, sizeof(color));
+				color[3] *= opacity;
+				wlr_scene_rect_set_color(node, color);
+			}
+		}
+		return;
+	}
+	for (int i = 0; i < switcher_state.count; i++)
+		switcher_tile_layout(switcher_state.tiles[i]);
+	if (switcher_state.mon->title_message_bar)
+		switcher_title_opacity(switcher_state.mon->title_message_bar->scene,
+							   opacity);
+	switcher_apply_highlight();
+}
 
 // map the surface tree into the fixed tile box, re-run after each commit
 // because the content size or clip may change
@@ -33,6 +208,16 @@ void switcher_tile_layout(struct switcher_tile *tile) {
 
 	double scale_x = (double)tile->cw / src_w;
 	double scale_y = (double)switcher_state.tile_h / src_h;
+	struct wlr_box visible = {.width = tile->cw, .height = switcher_state.tile_h};
+	if (switcher_state.motion) {
+		int x, y;
+		wlr_scene_node_coords(&tile->content->node, &x, &y);
+		struct wlr_box crop = switcher_state.motion->current;
+		crop.x -= x;
+		crop.y -= y;
+		if (!wlr_box_intersection(&visible, &visible, &crop))
+			visible = (struct wlr_box){0};
+	}
 	struct switcher_surface *entry;
 	wl_list_for_each(entry, &tile->surfaces, link) {
 		struct wlr_surface *s = entry->surface;
@@ -41,10 +226,10 @@ void switcher_tile_layout(struct switcher_tile *tile) {
 		int dw = (int)(s->current.width * scale_x);
 		int dh = (int)(s->current.height * scale_y);
 
-		int cx0 = MANGO_MAX(px, 0);
-		int cy0 = MANGO_MAX(py, 0);
-		int cx1 = MANGO_MIN(px + dw, tile->cw);
-		int cy1 = MANGO_MIN(py + dh, switcher_state.tile_h);
+		int cx0 = MANGO_MAX(px, visible.x);
+		int cy0 = MANGO_MAX(py, visible.y);
+		int cx1 = MANGO_MIN(px + dw, visible.x + visible.width);
+		int cy1 = MANGO_MIN(py + dh, visible.y + visible.height);
 		int cw = cx1 - cx0;
 		int ch = cy1 - cy0;
 		if (cw <= 0 || ch <= 0) {
@@ -67,6 +252,15 @@ void switcher_tile_layout(struct switcher_tile *tile) {
 		wlr_scene_buffer_set_source_box(entry->buffer, &src);
 		wlr_scene_node_set_position(&entry->buffer->node, cx0, cy0);
 		wlr_scene_buffer_set_dest_size(entry->buffer, cw, ch);
+		if (switcher_state.motion) {
+			const struct wlr_alpha_modifier_surface_v1_state *alpha =
+				wlr_alpha_modifier_v1_get_surface_state(s);
+			wlr_scene_buffer_set_opacity(entry->buffer,
+				expand_content_opacity(switcher_state.motion->progress) *
+				(alpha ? alpha->multiplier : 1.0));
+			wlr_scene_buffer_set_corner_radius(entry->buffer,
+				MANGO_MIN((int)config.border_radius, MANGO_MIN(cw, ch) / 2));
+		}
 	}
 }
 
@@ -227,6 +421,7 @@ void switcher_tile_create(struct switcher_tile *tile, Client *c) {
 
 	tile->tree = wlr_scene_tree_create(switcher_state.tree);
 	tile->frame = wlr_scene_rect_create(tile->tree, 1, 1, config.bordercolor);
+	wlr_scene_node_set_enabled(&tile->frame->node, !switcher_state.motion);
 	tile->content = wlr_scene_tree_create(tile->tree);
 	wlr_scene_node_set_position(&tile->content->node, SW_PAD, SW_PAD);
 	wlr_surface_for_each_surface(client_surface(c), switcher_tile_add_surface,
@@ -272,7 +467,12 @@ void switcher_layout(void) {
 	switcher_state.panel_h = panel_h;
 	wlr_scene_node_set_position(&switcher_state.tree->node,
 								switcher_state.panel_x, switcher_state.panel_y);
-	wlr_scene_rect_set_size(switcher_state.bg, panel_w, panel_h);
+	if (switcher_state.bg)
+		wlr_scene_rect_set_size(switcher_state.bg, panel_w, panel_h);
+	if (switcher_state.motion) {
+		switcher_state.motion->final = (struct wlr_box){
+			switcher_state.panel_x, switcher_state.panel_y, panel_w, panel_h};
+	}
 
 	int row = -1;
 	int x = 0;
@@ -289,9 +489,28 @@ void switcher_layout(void) {
 	}
 	free(rowsw);
 	title_message_bar_update(switcher_state.mon);
+	if (switcher_state.motion)
+		switcher_motion_apply(switcher_state.motion);
 }
 
 void switcher_apply_highlight(void) {
+	if (switcher_state.motion) {
+		struct switcher_motion *motion = switcher_state.motion;
+		struct switcher_tile *tile = switcher_state.tiles[switcher_state.index];
+		struct wlr_box lens = {
+			.x = tile->tree->node.x - motion->glass->node.x,
+			.y = tile->tree->node.y - motion->glass->node.y,
+			.width = tile->cw + 2 * SW_PAD,
+			.height = switcher_state.tile_h + 2 * SW_PAD,
+		};
+		motion->lens = lens;
+		motion->lens.x += motion->current.x;
+		motion->lens.y += motion->current.y;
+		struct wlr_box clip = {0, 0, motion->glass->width, motion->glass->height};
+		wlr_scene_blur_set_glass_lens(motion->glass, &lens,
+									 config.border_radius + SW_PAD, &clip);
+		return;
+	}
 	const float *highlight = config.switcher_highlight_color[3] < 0.0f
 								 ? config.focuscolor
 								 : config.switcher_highlight_color;
@@ -305,6 +524,72 @@ void switcher_close(void) {
 	if (!switcher_is_active())
 		return;
 	Monitor *m = switcher_state.mon;
+	struct switcher_motion *motion = switcher_state.motion;
+	if (motion) {
+		/* Freeze content before focus changes underneath the closing glass. */
+		struct wlr_scene_tree *snapshot = wlr_scene_tree_snapshot(
+			&switcher_state.tree->node, server.layers[LyrSpecialOverlay]);
+		wlr_scene_node_reparent(&motion->glass->node, snapshot);
+		wlr_scene_node_lower_to_bottom(&motion->glass->node);
+		wlr_scene_node_set_position(&motion->glass->node,
+			motion->current.x, motion->current.y);
+		mango_scene_node_set_ignore_hit(&snapshot->node, true);
+		motion->tree = snapshot;
+		motion->closing = true;
+		motion->close_start = motion->progress;
+		if (m->title_message_bar && m->title_message_bar->scene->node.enabled) {
+			struct wlr_scene_tree *title = m->title_message_bar->scene;
+			motion->title_box = (struct wlr_box){
+				title->node.x, title->node.y,
+				m->title_message_bar->logical_width,
+				m->title_message_bar->logical_height};
+			motion->title = wlr_scene_tree_snapshot(
+				&title->node, server.layers[LyrSpecialOverlay]);
+			if (m->title_message_bar->buffer)
+				wlr_scene_node_for_each_buffer(&motion->title->node,
+					switcher_title_snapshot_buffer,
+					&m->title_message_bar->buffer->base);
+			mango_scene_node_set_ignore_hit(&motion->title->node, true);
+			struct wlr_scene_node *node;
+			wl_list_for_each_reverse(node, &title->children, link) {
+				if (!node->enabled)
+					continue;
+				if (node->type == WLR_SCENE_NODE_BLUR) {
+					struct wlr_scene_blur *source = wlr_scene_blur_from_node(node);
+					motion->title_glass = wlr_scene_blur_create(
+						motion->title, source->width, source->height);
+					wlr_scene_blur_set_glass(motion->title_glass, true);
+					wlr_scene_blur_set_should_only_blur_bottom_layer(
+						motion->title_glass, false);
+					wlr_scene_node_set_position(&motion->title_glass->node,
+						title->node.x + node->x, title->node.y + node->y);
+					wlr_scene_node_lower_to_bottom(&motion->title_glass->node);
+				} else if (node->type == WLR_SCENE_NODE_RECT &&
+						   motion->title_rect_count < 2) {
+					int i = motion->title_rect_count++;
+					struct wlr_scene_rect *source = wlr_scene_rect_from_node(node);
+					motion->title_rects[i].final = (struct wlr_box){
+						title->node.x + node->x, title->node.y + node->y,
+						source->width, source->height};
+					const float *color = source == m->title_message_bar->border
+						? config.title_message_bardata.border_color
+						: config.title_message_bardata.focus_bg_color;
+					memcpy(motion->title_rects[i].color, color, sizeof(float) * 4);
+					struct wlr_scene_rect *rect = wlr_scene_rect_create(
+						motion->title, source->width, source->height, source->color);
+					motion->title_rects[i].rect = rect;
+					wlr_scene_rect_set_corner_radii(rect, source->corners);
+					wlr_scene_node_set_position(&rect->node,
+						title->node.x + node->x, title->node.y + node->y);
+					wlr_scene_node_lower_to_bottom(&rect->node);
+				}
+			}
+		}
+		clock_gettime(CLOCK_MONOTONIC, &motion->started);
+		wl_event_source_timer_update(motion->timer, 16);
+	}
+	if (m->title_message_bar)
+		switcher_title_opacity(m->title_message_bar->scene, 1.0);
 	for (int i = 0; i < switcher_state.count; i++) {
 		struct switcher_surface *entry, *tmp;
 		wl_list_for_each_safe(entry, tmp, &switcher_state.tiles[i]->surfaces,
@@ -455,8 +740,32 @@ void switcher_open(int scope, int dir) {
 
 	switcher_state.tree =
 		wlr_scene_tree_create(server.layers[LyrSpecialOverlay]);
-	switcher_state.bg =
-		wlr_scene_rect_create(switcher_state.tree, 1, 1, switcher_panel_color);
+	if (config.switcher_glass) {
+		struct switcher_motion *motion = ecalloc(1, sizeof(*motion));
+		switcher_state.motion = motion;
+		motion->tree = switcher_state.tree;
+		motion->glass = wlr_scene_blur_create(motion->tree, 1, 1);
+		wlr_scene_blur_set_glass(motion->glass, true);
+		wlr_scene_blur_set_should_only_blur_bottom_layer(motion->glass, false);
+		mango_scene_node_set_ignore_hit(&motion->tree->node, true);
+		motion->progress = config.animations && config.animation_duration_open > 0
+							   ? 0.0 : 1.0;
+		clock_gettime(CLOCK_MONOTONIC, &motion->started);
+		motion->timer = wl_event_loop_add_timer(server.event_loop,
+											   switcher_motion_tick, motion);
+		LISTEN(&switcher_state.mon->wlr_output->events.destroy,
+			&motion->output_destroy, switcher_motion_output_destroy);
+		/* Release monitor references before the monitor's own destroy listener. */
+		wl_list_remove(&motion->output_destroy.link);
+		wl_list_insert(
+			&switcher_state.mon->wlr_output->events.destroy.listener_list,
+			&motion->output_destroy.link);
+		if (motion->progress < 1.0)
+			wl_event_source_timer_update(motion->timer, 16);
+	} else {
+		switcher_state.bg =
+			wlr_scene_rect_create(switcher_state.tree, 1, 1, switcher_panel_color);
+	}
 	switcher_state.tiles = ecalloc(n, sizeof(*switcher_state.tiles));
 	wl_list_for_each(c, &server.focus_stack, flink) {
 		if (!switcher_candidate(c))
@@ -491,6 +800,8 @@ void switcher_cycle(int dir) {
 						   switcher_state.count;
 	switcher_apply_highlight();
 	title_message_bar_update(switcher_state.mon);
+	if (switcher_state.motion)
+		switcher_motion_apply(switcher_state.motion);
 }
 
 int32_t switcher(const Arg *arg) {

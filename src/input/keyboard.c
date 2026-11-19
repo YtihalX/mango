@@ -734,8 +734,7 @@ void handle_keyboard_key(struct wl_listener *listener, void *data) {
 	if (switcher_is_active()) {
 		if (server.session_locked) {
 			switcher_close();
-		} else if (!group->virtual_keyboard &&
-				   event->state == WL_KEYBOARD_KEY_STATE_RELEASED &&
+		} else if (event->state == WL_KEYBOARD_KEY_STATE_RELEASED &&
 				   ISMODEKEYCODE(keycode)) {
 			switcher_commit();
 			group->nsyms = 0;
