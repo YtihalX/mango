@@ -4,6 +4,7 @@
 #include "mango/common/types.h"
 #include "mango/dispatch/bind.h"
 #include <scenefx/types/fx/blur_data.h>
+#include <scenefx/types/fx/glass_data.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <wlr/types/wlr_switch.h>
@@ -153,6 +154,8 @@ typedef struct {
 	int32_t no_swallow;
 	int32_t confine_pointer;
 	int32_t no_blur;
+	int32_t glass;
+	int32_t glass_radius;
 	float focused_opacity;
 	float unfocused_opacity;
 	float scroller_proportion_single;
@@ -217,6 +220,8 @@ typedef struct {
 	int32_t no_blur;
 	int32_t no_animation;
 	int32_t no_shadow;
+	int32_t glass;
+	int32_t glass_radius;
 } ConfigLayerRule;
 
 typedef struct {
@@ -467,6 +472,7 @@ typedef struct {
 	int32_t blur_optimized;
 	int32_t border_radius;
 	struct blur_data blur_params;
+	struct glass_data glass_params;
 	int32_t shadows;
 	int32_t shadow_only_floating;
 	int32_t layer_shadows;
@@ -510,6 +516,7 @@ typedef struct {
 	float dropcolor[4];
 	float splitcolor[4];
 	float focuscolor[4];
+	float switcher_highlight_color[4]; // Negative alpha inherits focuscolor.
 	float maximizescreencolor[4];
 	float urgentcolor[4];
 	float scratchpadcolor[4];

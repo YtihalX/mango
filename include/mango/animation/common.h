@@ -83,6 +83,9 @@ bool scene_node_snapshot(struct wlr_scene_node *node, int32_t lx, int32_t ly,
 
 struct wlr_scene_tree *wlr_scene_tree_snapshot(struct wlr_scene_node *node,
 											   struct wlr_scene_tree *parent);
+/* Adds a live backdrop node below snapshot buffers, with snapshot clipping. */
+struct wlr_scene_blur *scene_snapshot_add_glass(
+	struct wlr_scene_tree *snapshot, struct wlr_scene_blur *source);
 void scene_snapshot_clip_to_box(struct wlr_scene_tree *snapshot,
 								const struct wlr_box *bounds, bool scale,
 								int32_t width, int32_t height);

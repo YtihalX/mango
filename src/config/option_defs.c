@@ -213,6 +213,42 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 		config->blur_params.contrast = atof(value);
 	} else if (strcmp(key, "blur_params_saturation") == 0) {
 		config->blur_params.saturation = atof(value);
+	} else if (strcmp(key, "glass_bezel") == 0) {
+		config->glass_params.bezel = atof(value);
+	} else if (strcmp(key, "glass_refraction") == 0) {
+		config->glass_params.refraction = atof(value);
+	} else if (strcmp(key, "glass_dispersion") == 0) {
+		config->glass_params.dispersion = atof(value);
+	} else if (strcmp(key, "glass_specular") == 0) {
+		config->glass_params.specular = atof(value);
+	} else if (strcmp(key, "glass_light_angle") == 0) {
+		config->glass_params.light_angle = atof(value);
+	} else if (strcmp(key, "glass_dim") == 0) {
+		config->glass_params.dim = atof(value);
+	} else if (strcmp(key, "glass_clarity") == 0) {
+		config->glass_params.clarity = atof(value);
+	} else if (strcmp(key, "glass_tint") == 0) {
+		int64_t color = parse_color(value);
+		if (color == -1) {
+			mango_error(false, WLR_ERROR,
+						"Invalid glass_tint "
+						"format: \033[1m\033[31m%s\033[0m\n",
+						value);
+			return false;
+		}
+		convert_hex_to_rgba(config->glass_params.tint, color);
+	} else if (strcmp(key, "glass_lens_bezel") == 0) {
+		config->glass_params.lens_bezel = atof(value);
+	} else if (strcmp(key, "glass_lens_tint") == 0) {
+		int64_t color = parse_color(value);
+		if (color == -1) {
+			mango_error(false, WLR_ERROR,
+						"Invalid glass_lens_tint "
+						"format: \033[1m\033[31m%s\033[0m\n",
+						value);
+			return false;
+		}
+		convert_hex_to_rgba(config->glass_params.lens_tint, color);
 	} else if (strcmp(key, "shadows") == 0) {
 		config->shadows = atoi(value);
 	} else if (strcmp(key, "shadow_only_floating") == 0) {
@@ -1046,6 +1082,14 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 		} else {
 			convert_hex_to_rgba(config->focuscolor, color);
 		}
+	} else if (strcmp(key, "switcher_highlight_color") == 0) {
+		int64_t color = parse_color(value);
+		if (color == -1) {
+			mango_error(false, WLR_ERROR,
+						"Invalid switcher_highlight_color format: %s\n", value);
+			return false;
+		}
+		convert_hex_to_rgba(config->switcher_highlight_color, color);
 	} else if (strcmp(key, "maximized_screen_color") == 0) {
 		int64_t color = parse_color(value);
 		if (color == -1) {
@@ -1362,6 +1406,9 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 		rule->no_blur = 0;
 		rule->no_animation = 0;
 		rule->no_shadow = 0;
+		// Unset, so a later rule for the same layer keeps an earlier one's glass
+		rule->glass = -1;
+		rule->glass_radius = -1;
 
 		bool parse_error = false;
 		char *token = strtok(value, ",");
@@ -1390,6 +1437,10 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 					rule->no_animation = CLAMP_INT(atoi(val), 0, 1);
 				} else if (strcmp(key, "no_shadow") == 0) {
 					rule->no_shadow = CLAMP_INT(atoi(val), 0, 1);
+				} else if (strcmp(key, "glass") == 0) {
+					rule->glass = CLAMP_INT(atoi(val), 0, 1);
+				} else if (strcmp(key, "glass_radius") == 0) {
+					rule->glass_radius = CLAMP_INT(atoi(val), 0, 10000);
 				} else {
 					mango_error(false, WLR_ERROR,
 								"Unknown "
@@ -1464,6 +1515,8 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 		rule->no_swallow = -1;
 		rule->confine_pointer = -1;
 		rule->no_blur = -1;
+		rule->glass = -1;
+		rule->glass_radius = -1;
 		rule->no_focus = -1;
 		rule->no_fade_in = -1;
 		rule->no_fade_out = -1;
@@ -1594,6 +1647,10 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 					rule->confine_pointer = atoi(val);
 				} else if (strcmp(key, "no_blur") == 0) {
 					rule->no_blur = atoi(val);
+				} else if (strcmp(key, "glass") == 0) {
+					rule->glass = CLAMP_INT(atoi(val), 0, 1);
+				} else if (strcmp(key, "glass_radius") == 0) {
+					rule->glass_radius = CLAMP_INT(atoi(val), 0, 10000);
 				} else if (strcmp(key, "scroller_proportion") == 0) {
 					rule->scroller_proportion = atof(val);
 				} else if (strcmp(key, "is_fullscreen") == 0) {
@@ -2559,6 +2616,7 @@ void set_value_default() {
 	config.blur_params.brightness = 0.9f;
 	config.blur_params.contrast = 0.9f;
 	config.blur_params.saturation = 1.2f;
+	config.glass_params = glass_data_get_default();
 	config.shadows = 0;
 	config.shadow_only_floating = 1;
 	config.layer_shadows = 0;
@@ -2711,6 +2769,7 @@ void set_value_default() {
 	config.focuscolor[1] = 0x6b / 255.0f;
 	config.focuscolor[2] = 0x25 / 255.0f;
 	config.focuscolor[3] = 1.0f;
+	config.switcher_highlight_color[3] = -1.0f;
 	config.maximizescreencolor[0] = 0x89 / 255.0f;
 	config.maximizescreencolor[1] = 0xaa / 255.0f;
 	config.maximizescreencolor[2] = 0x61 / 255.0f;
@@ -2961,6 +3020,17 @@ void override_config(void) {
 		CLAMP_FLOAT(config.blur_params.contrast, 0, 2);
 	config.blur_params.saturation =
 		CLAMP_FLOAT(config.blur_params.saturation, 0, 2);
+	config.glass_params.bezel = CLAMP_FLOAT(config.glass_params.bezel, 0, 200);
+	config.glass_params.lens_bezel =
+		CLAMP_FLOAT(config.glass_params.lens_bezel, 0, 200);
+	config.glass_params.refraction =
+		CLAMP_FLOAT(config.glass_params.refraction, 0, 4);
+	// glass_data_reach() assumes refractive indices of at most 1.65
+	config.glass_params.dispersion =
+		CLAMP_FLOAT(config.glass_params.dispersion, 0, 0.15);
+	config.glass_params.specular = CLAMP_FLOAT(config.glass_params.specular, 0, 1);
+	config.glass_params.dim = CLAMP_FLOAT(config.glass_params.dim, 0, 1);
+	config.glass_params.clarity = CLAMP_FLOAT(config.glass_params.clarity, 0, 1);
 	config.shadows = CLAMP_INT(config.shadows, 0, 1);
 	config.shadow_only_floating = CLAMP_INT(config.shadow_only_floating, 0, 1);
 	config.layer_shadows = CLAMP_INT(config.layer_shadows, 0, 1);

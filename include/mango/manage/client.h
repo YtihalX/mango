@@ -196,6 +196,8 @@ struct Client {
 	float unfocused_opacity;
 	char oldmonname[128];
 	int32_t no_blur;
+	int32_t glass;
+	int32_t glass_radius;
 	float blur_opacity;
 	struct wlr_ext_foreign_toplevel_handle_v1 *ext_foreign_toplevel;
 	double master_mfact_per, master_inner_per, stack_inner_per;
@@ -302,6 +304,7 @@ void client_set_border_color(Client *c, const float color[4]);
 void client_set_state_colors(Client *c, const float border_color[4],
 							 const float dim_color[4]);
 void client_set_scale(struct wlr_surface *s, float scale);
+void client_update_scale(Client *c);
 
 /*
  * Clips the XWayland root surface via source_box.
@@ -388,6 +391,7 @@ void handle_client_request_minimize(struct wl_listener *listener, void *data);
 void handle_client_set_title(struct wl_listener *listener, void *data);
 void handle_client_activation_request(struct wl_listener *listener, void *data);
 void pending_kill_client(Client *c);
+bool client_uses_glass(Client *c);
 bool client_blur_uses_wallpaper(Client *c);
 void client_sync_blur_optimized(Client *c);
 void iter_xdg_scene_buffers(struct wlr_scene_buffer *buffer, int32_t sx,

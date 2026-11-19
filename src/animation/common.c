@@ -298,6 +298,43 @@ struct wlr_scene_tree *wlr_scene_tree_snapshot(struct wlr_scene_node *node,
 	return snapshot;
 }
 
+struct wlr_scene_blur *scene_snapshot_add_glass(
+	struct wlr_scene_tree *snapshot, struct wlr_scene_blur *source) {
+	struct wlr_scene_tree *wrapper = wlr_scene_tree_create(snapshot);
+	if (!wrapper)
+		return NULL;
+
+	SnapshotMetadata *meta = calloc(1, sizeof(*meta));
+	if (!meta) {
+		wlr_scene_node_destroy(&wrapper->node);
+		return NULL;
+	}
+	meta->type = Snapshot;
+	meta->orig_width = source->width;
+	meta->orig_height = source->height;
+	meta->destroy.notify = handle_snapshot_meta_destroy;
+	wl_signal_add(&wrapper->node.events.destroy, &meta->destroy);
+	mango_scene_node_set(&wrapper->node, Snapshot, meta);
+
+	struct wlr_scene_blur *blur =
+		wlr_scene_blur_create(wrapper, source->width, source->height);
+	if (!blur) {
+		wlr_scene_node_destroy(&wrapper->node);
+		return NULL;
+	}
+
+	int32_t x, y;
+	wlr_scene_node_coords(&source->node, &x, &y);
+	wlr_scene_node_set_position(&wrapper->node, x, y);
+	wlr_scene_node_lower_to_bottom(&wrapper->node);
+	wlr_scene_blur_set_glass(blur, true);
+	wlr_scene_blur_set_should_only_blur_bottom_layer(blur, false);
+	wlr_scene_blur_set_corner_radii(blur, source->corners);
+	wlr_scene_blur_set_strength(blur, source->strength);
+	wlr_scene_blur_set_alpha(blur, source->alpha);
+	return blur;
+}
+
 static void snapshot_dest_to_source(enum wl_output_transform transform, float x,
 									float y, float *src_x, float *src_y) {
 	switch (transform) {
@@ -344,11 +381,41 @@ struct SnapshotClipData {
 	bool scale;
 };
 
-static void scene_snapshot_enable_buffers(struct wlr_scene_node *node) {
+static void scene_snapshot_prepare_clip(struct wlr_scene_node *node,
+										struct SnapshotClipData *clip) {
 	if (node->type == WLR_SCENE_NODE_BUFFER) {
 		if (!node->enabled) {
 			wlr_scene_node_set_enabled(node, true);
 		}
+		return;
+	}
+	if (node->type == WLR_SCENE_NODE_BLUR) {
+		struct wlr_scene_blur *blur = wlr_scene_blur_from_node(node);
+		MangoSceneNode *snapshot_node = mango_scene_node_find(node);
+		if (!blur->glass || !snapshot_node ||
+			snapshot_node->type != Snapshot || !snapshot_node->owner)
+			return;
+
+		SnapshotMetadata *meta = snapshot_node->owner;
+		int32_t x, y;
+		wlr_scene_node_coords(node, &x, &y);
+		struct wlr_box box = {
+			.x = x - node->x + meta->orig_x,
+			.y = y - node->y + meta->orig_y,
+			.width = clip->scale ? clip->width : meta->orig_width,
+			.height = clip->scale ? clip->height : meta->orig_height,
+		};
+		struct wlr_box visible;
+		if (box.width <= 0 || box.height <= 0 ||
+			!wlr_box_intersection(&visible, &box, &clip->bounds)) {
+			wlr_scene_node_set_enabled(node, false);
+			return;
+		}
+
+		wlr_scene_node_set_enabled(node, true);
+		wlr_scene_node_set_position(node, meta->orig_x + visible.x - box.x,
+									meta->orig_y + visible.y - box.y);
+		wlr_scene_blur_set_size(blur, visible.width, visible.height);
 		return;
 	}
 	if (node->type != WLR_SCENE_NODE_TREE) {
@@ -358,7 +425,7 @@ static void scene_snapshot_enable_buffers(struct wlr_scene_node *node) {
 	struct wlr_scene_tree *tree = wlr_scene_tree_from_node(node);
 	struct wlr_scene_node *child;
 	wl_list_for_each(child, &tree->children, link) {
-		scene_snapshot_enable_buffers(child);
+		scene_snapshot_prepare_clip(child, clip);
 	}
 }
 
@@ -473,7 +540,7 @@ void scene_snapshot_clip_to_box(struct wlr_scene_tree *snapshot,
 		.height = height,
 		.scale = scale,
 	};
-	scene_snapshot_enable_buffers(&snapshot->node);
+	scene_snapshot_prepare_clip(&snapshot->node, &clip);
 	wlr_scene_node_for_each_buffer(&snapshot->node, scene_snapshot_clip_buffer,
 								   &clip);
 }

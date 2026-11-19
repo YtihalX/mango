@@ -120,6 +120,24 @@ void reapply_property(void) {
 			if (!c->no_border && !c->isfullscreen) {
 				c->bw = config.borderpx;
 			}
+			/* Reload visual rules without replaying map-only actions. One-shot
+			 * rules remain map-only and must not be consumed by existing clients. */
+			c->glass = 0;
+			c->glass_radius = -1;
+			const char *appid = client_get_appid(c);
+			const char *title = client_get_title(c);
+			for (int32_t i = 0; i < config.window_rules_count; i++) {
+				ConfigWinRule *r = &config.window_rules[i];
+				if (r->is_once ||
+					!is_window_rule_matches(r, appid ? appid : "broken",
+										   title ? title : "broken"))
+					continue;
+				APPLY_INT_PROP(c, r, glass);
+				APPLY_INT_PROP(c, r, glass_radius);
+			}
+			client_sync_blur_optimized(c);
+			if (c->glass)
+				c->need_output_flush = true;
 			client_set_group_config(c);
 			client_set_tab_bar_config(c);
 		}
@@ -185,6 +203,7 @@ void reset_option(void) {
 }
 
 void reset_blur_params(void) {
+	wlr_scene_set_glass_data(server.scene, &config.glass_params);
 	if (config.blur) {
 		Monitor *m = NULL;
 		wl_list_for_each(m, &server.monitors, link) {

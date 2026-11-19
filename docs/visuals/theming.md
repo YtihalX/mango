@@ -34,6 +34,8 @@ split_color=0xEB441EFF
 
 # Active window border
 focus_color=0xc66b25ff
+# Optional: switcher selection colour, otherwise inherits focus_color.
+# switcher_highlight_color=0x6ba7dcff
 
 # Urgent window border (alerts)
 urgent_color=0xad401fff

@@ -171,6 +171,9 @@ void iter_layer_scene_buffers(struct wlr_scene_buffer *buffer, int32_t sx,
 	wlr_scene_blur_set_size(l->blur, l->geom.width, l->geom.height);
 	wlr_scene_blur_set_should_only_blur_bottom_layer(
 		l->blur, layer_blur_uses_wallpaper(l));
+	// Glass takes its shape from the layer's box and radius, not the mask
+	wlr_scene_blur_set_glass(l->blur, l->glass);
+	wlr_scene_blur_set_corner_radius(l->blur, l->glass_radius);
 }
 
 bool layer_blur_uses_wallpaper(LayerSurface *l) {
@@ -215,6 +218,8 @@ void handle_layer_surface_map(struct wl_listener *listener, void *data) {
 	l->dirty = false;
 	l->shield_when_capture = false;
 	l->no_blur = 0;
+	l->glass = 0;
+	l->glass_radius = 0;
 	l->shadow = NULL;
 	l->need_output_flush = true;
 	l->animation_type_open = ANIM_TYPE_UNSET;
@@ -230,6 +235,8 @@ void handle_layer_surface_map(struct wl_listener *listener, void *data) {
 			APPLY_INT_PROP(l, r, no_blur);
 			APPLY_INT_PROP(l, r, no_animation);
 			APPLY_INT_PROP(l, r, no_shadow);
+			APPLY_INT_PROP(l, r, glass);
+			APPLY_INT_PROP(l, r, glass_radius);
 			APPLY_INT_PROP(l, r, animation_type_open);
 			APPLY_INT_PROP(l, r, animation_type_close);
 		}
@@ -341,9 +348,9 @@ void handle_layer_surface_commit(struct wl_listener *listener, void *data) {
 		}
 	}
 
-	if (config.blur && config.blur_layer) {
+	if (config.blur && (config.blur_layer || l->glass)) {
 
-		if (!l->no_blur &&
+		if ((l->glass || !l->no_blur) &&
 			layer_surface->current.layer != ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM &&
 			layer_surface->current.layer !=
 				ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND &&

@@ -1150,11 +1150,13 @@ void handle_output_layout_change(struct wl_listener *listener, void *data) {
 		mon_pos_offsety = m->m.y - oldy;
 
 		wl_list_for_each(c, &server.clients, link) {
+			// When the monitor scale changes, reapply the client's scale and
+			// reconfigure X11 windows.
+			if (c->mon == m) {
+				client_update_scale(c);
+			}
 #ifdef XWAYLAND
-			// When the monitor scale changes, reapply XWayland scaling and
-			// reconfigure windows.
 			if (client_is_x11(c) && c->mon == m) {
-				xwayland_apply_scale(c);
 				if (client_surface(c)->mapped)
 					resize(c, c->geom, (ResizeOpts){.interact = 0});
 			}

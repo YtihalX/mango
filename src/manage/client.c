@@ -42,6 +42,7 @@
 #include <wlr/types/wlr_linux_drm_syncobj_v1.h>
 #include <wlr/types/wlr_pointer_constraints_v1.h>
 #include <wlr/types/wlr_presentation_time.h>
+#include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/types/wlr_xcursor_manager.h>
@@ -401,6 +402,32 @@ static void client_notify_fullscreen(Client *c, int32_t fullscreen) {
 void client_set_scale(struct wlr_surface *s, float scale) {
 	wlr_fractional_scale_v1_notify_scale(s, scale);
 	wlr_surface_set_preferred_buffer_scale(s, (int32_t)ceilf(scale));
+}
+
+/*
+ * Tells the client the scale of the monitor it is on. Clients render at that
+ * scale and are resampled by the compositor until they are told otherwise, so
+ * without this a window that maps before it has a monitor, or that moves to a
+ * monitor with another scale, keeps rendering at its old scale and looks
+ * blurry.
+ */
+void client_update_scale(Client *c) {
+	struct wlr_surface *surface;
+
+	if (!c || !c->mon) {
+		return;
+	}
+	surface = client_surface(c);
+	if (!surface) {
+		return;
+	}
+#ifdef XWAYLAND
+	if (client_is_x11(c)) {
+		xwayland_apply_scale(c);
+		return;
+	}
+#endif
+	client_set_scale(surface, c->mon->wlr_output->scale);
 }
 
 /*
@@ -1539,6 +1566,8 @@ void apply_rule_properties(Client *c, const ConfigWinRule *r) {
 	APPLY_INT_PROP(c, r, activation_bypass);
 	APPLY_INT_PROP(c, r, isunglobal);
 	APPLY_INT_PROP(c, r, no_blur);
+	APPLY_INT_PROP(c, r, glass);
+	APPLY_INT_PROP(c, r, glass_radius);
 	APPLY_INT_PROP(c, r, allow_shortcuts_inhibit);
 
 	APPLY_FLOAT_PROP(c, r, scroller_proportion);
@@ -2115,6 +2144,8 @@ void init_client_properties(Client *c) {
 	c->no_swallow = 0;
 	c->isterm = 0;
 	c->no_blur = 0;
+	c->glass = 0;
+	c->glass_radius = -1;
 	c->tearing_hint = 0;
 	c->overview_isfullscreenbak = 0;
 	c->overview_ismaximizescreenbak = 0;
@@ -2443,6 +2474,11 @@ void handle_client_commit(struct wl_listener *listener, void *data) {
 											   c->decoration);
 		return;
 	}
+
+	/* Transparency can change without a configure or geometry change. Sync
+	 * before the animation/parking early returns so the next frame uses it. */
+	if (!c->iskilling)
+		client_sync_blur_optimized(c);
 
 	if (client_is_parked(c))
 		return;
@@ -2790,8 +2826,41 @@ void pending_kill_client(Client *c) {
 	client_send_close(c);
 }
 
+bool client_uses_glass(Client *c) {
+	if (!config.blur || !c || !c->glass)
+		return false;
+
+	struct wlr_surface *surface = client_surface(c);
+	if (!surface || !surface->buffer || surface->current.width <= 0 ||
+		surface->current.height <= 0)
+		return false;
+
+	const struct wlr_alpha_modifier_surface_v1_state *alpha =
+		wlr_alpha_modifier_v1_get_surface_state(surface);
+	if (alpha && alpha->multiplier < 1.0)
+		return true;
+
+	if (wlr_buffer_is_opaque(&surface->buffer->base))
+		return false;
+
+	/* Alpha-capable buffers can still contain fully opaque application content.
+	 * Compositor focus/fade opacity is deliberately not part of this decision. */
+	pixman_box32_t bounds = {0, 0, surface->current.width,
+							surface->current.height};
+	/* CSD shadows outside the window geometry don't make opaque content glass. */
+	if (!client_is_x11(c) && c->surface.xdg->geometry.width > 0 &&
+		c->surface.xdg->geometry.height > 0) {
+		struct wlr_box *geometry = &c->surface.xdg->geometry;
+		bounds = (pixman_box32_t){geometry->x, geometry->y,
+								geometry->x + geometry->width,
+								geometry->y + geometry->height};
+	}
+	return pixman_region32_contains_rectangle(&surface->opaque_region,
+											 &bounds) != PIXMAN_REGION_IN;
+}
+
 bool client_blur_uses_wallpaper(Client *c) {
-	if (!c)
+	if (!c || (c->blur && c->blur->glass))
 		return false;
 	return config.blur_optimized ||
 		   blur_layer_on_wallpaper(client_target_layer(c));
@@ -2800,8 +2869,15 @@ bool client_blur_uses_wallpaper(Client *c) {
 void client_sync_blur_optimized(Client *c) {
 	if (!c || !c->blur)
 		return;
-	wlr_scene_blur_set_should_only_blur_bottom_layer(
-		c->blur, client_blur_uses_wallpaper(c));
+	bool glass = client_uses_glass(c);
+	if (c->blur->glass != glass) {
+		c->need_output_flush = true;
+		if (c->mon)
+			wlr_output_schedule_frame(c->mon->wlr_output);
+	}
+	wlr_scene_blur_set_glass(c->blur, glass);
+	wlr_scene_blur_set_should_only_blur_bottom_layer(c->blur,
+													client_blur_uses_wallpaper(c));
 }
 
 void iter_xdg_scene_buffers(struct wlr_scene_buffer *buffer, int32_t sx,
@@ -2819,9 +2895,7 @@ void iter_xdg_scene_buffers(struct wlr_scene_buffer *buffer, int32_t sx,
 	if (wlr_subsurface_try_from_wlr_surface(surface) != NULL)
 		return;
 
-	if (config.blur && c && !c->no_blur) {
-		client_sync_blur_optimized(c);
-	}
+	client_sync_blur_optimized(c);
 }
 
 void scene_buffer_apply_opacity(struct wlr_scene_buffer *buffer, int32_t sx,
@@ -3223,6 +3297,9 @@ void client_set_monitor(Client *c, Monitor *m, uint32_t newtags, bool focus) {
 		return;
 
 	if (m) {
+		/* The client renders at the scale of the monitor it is on. */
+		client_update_scale(c);
+
 		/* Make sure window actually overlaps with the monitor */
 		reset_foreign_tolevel(c, oldmon, m);
 		resize(c, c->geom, (ResizeOpts){.interact = 0});
@@ -4921,6 +4998,8 @@ void handle_xwayland_surface_commit(struct wl_listener *listener, void *data) {
 
 	/* Overview card nodes are independent scene_surfaces that auto-update on
 	 * commit. */
+
+	client_sync_blur_optimized(c);
 
 	/* Compares the acked X11 geometry with the one mango configured. */
 	struct wlr_box xgeo;

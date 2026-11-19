@@ -63,6 +63,8 @@ window_rule_once=Parameter:Values,Parameter:Values,app_id:Values,title:Values
 | Parameter | Type | Values | Description |
 | :--- | :--- | :--- | :--- |
 | `no_blur` | integer | `0` / `1` | Window does not have blur effect |
+| `glass` | integer | `0` / `1` | Refract the real backdrop beneath translucent window content. Requires `blur=1`; glass takes precedence over `no_blur`. |
+| `glass_radius` | integer | `0` and up | Corner radius for a glass window; defaults to `border_radius`. |
 | `no_border` | integer | `0` / `1` | Remove window border |
 | `no_shadow` | integer | `0` / `1` | Not apply shadow |
 | `no_radius` | integer | `0` / `1` | Not apply corner radius |

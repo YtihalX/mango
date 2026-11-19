@@ -6,6 +6,7 @@
 #include <stdbool.h>
 
 bool client_is_ignore_output_clip(Client *c);
+struct wlr_output *client_buffer_output_limit(struct wlr_scene_buffer *buffer);
 struct ivec2 compute_edge_offsets(Client *c);
 
 void client_actual_size(Client *client, int32_t *width, int32_t *height);

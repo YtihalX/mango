@@ -36,7 +36,9 @@ xkbcommon_dep = dependency('xkbcommon')
 libinput_dep = dependency('libinput',version: '>=1.27.1')
 libwayland_client_dep = dependency('wayland-client')
 pcre2_dep = dependency('libpcre2-8')
-libscenefx_dep = dependency('scenefx-0.5',version: '>=0.5.0')
+libscenefx_dep = subproject('scenefx',
+  default_options: ['default_library=static', 'examples=false'],
+).get_variable('scenefx')
 pixman_dep = dependency('pixman-1')
 cjson_dep = dependency('libcjson')
 pangocairo_dep = dependency('pangocairo')

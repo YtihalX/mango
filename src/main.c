@@ -1,6 +1,7 @@
 /*
  * See LICENSE file for copyright and license details.
  */
+#include "mango/animation/client.h"
 #include "mango/animation/common.h"
 #include "mango/common/input-event-codes.h"
 #include "mango/common/log.h"
@@ -13,6 +14,7 @@
 #include "mango/draw/text-node.h"
 #include "mango/ext-protocol/ext-workspace.h"
 #include "mango/ext-protocol/foreign-toplevel.h"
+#include "mango/ext-protocol/glass-lens.h"
 #include "mango/ext-protocol/hdr.h"
 #include "mango/ext-protocol/tearing.h"
 #include "mango/ext-protocol/text-input.h"
@@ -527,6 +529,7 @@ void setup(void) {
 
 	/* Initialize the scene graph used to lay out windows */
 	server.scene = wlr_scene_create();
+	server.scene->buffer_output_limit = client_buffer_output_limit;
 	server.root_bg =
 		wlr_scene_rect_create(&server.scene->tree, 0, 0, config.rootcolor);
 	for (i = 0; i < NUM_LAYERS; i++) {
@@ -667,6 +670,8 @@ void setup(void) {
 	server.tearing_new_object_listener.notify = handle_tearing_new_object;
 	wl_signal_add(&server.tearing_control->events.new_object,
 				  &server.tearing_new_object_listener);
+
+	glass_lens_manager_create(server.display);
 
 	/* Creates an output layout, which a wlroots utility for working with an
 	 * arrangement of screens in a physical layout. */
@@ -881,6 +886,7 @@ void setup(void) {
 		server.scene, config.blur_params.num_passes, config.blur_params.radius,
 		config.blur_params.noise, config.blur_params.brightness,
 		config.blur_params.contrast, config.blur_params.saturation);
+	wlr_scene_set_glass_data(server.scene, &config.glass_params);
 
 	/* create text_input-, and input_method-protocol relevant globals */
 	server.input_method_manager =

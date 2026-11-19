@@ -24,6 +24,8 @@ wl_protocol_dir + '/staging/cursor-shape/cursor-shape-v1.xml',
 	'wlr-foreign-toplevel-management-unstable-v1.xml',
 	'wlr-layer-shell-unstable-v1.xml',
 	'wlr-output-power-management-unstable-v1.xml',
+	# Linked here from minshell's compositor/pkg (the Makefile, the PKGBUILD)
+	'mango-glass-lens-v1.xml',
 ]
 wayland_sources = [
 	wayland_scanner_code.process(wayland_xmls),

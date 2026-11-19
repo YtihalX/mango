@@ -1,5 +1,6 @@
 #include "mango/animation/client.h"
 #include "mango/animation/common.h"
+#include "mango/common/scene_node.h"
 #include "mango/common/server.h"
 #include "mango/common/util.h"
 #include "mango/draw/title-message-bar.h"
@@ -70,6 +71,21 @@ bool client_is_ignore_output_clip(Client *c) {
 			!c->animation.tagouting);
 }
 
+struct wlr_output *client_buffer_output_limit(struct wlr_scene_buffer *buffer) {
+	MangoSceneNode *node = mango_scene_node_find(&buffer->node);
+	if (!node || node->type != XDGShell)
+		return NULL;
+
+	Client *c = node->owner;
+	if (!c || !c->mon || c == server.grab_client ||
+		(client_is_ignore_output_clip(c) && !c->animation.tagouted))
+		return NULL;
+
+	/* Positions and clips update separately. Don't advertise an output that
+	 * will be clipped away before this window is drawn. */
+	return c->mon->wlr_output;
+}
+
 struct ivec2 compute_edge_offsets(Client *c) {
 	struct ivec2 offsets = {0};
 	if (client_is_ignore_output_clip(c))
@@ -93,8 +109,10 @@ void set_rect_size(struct wlr_scene_rect *rect, int32_t width, int32_t height) {
 	wlr_scene_rect_set_size(rect, GEZERO(width), GEZERO(height));
 }
 struct fx_corner_radii set_client_corner_location(Client *c) {
-	struct fx_corner_radii current_corner_location =
-		corner_radii_all(config.border_radius);
+	int32_t radius = c->glass_radius >= 0 && c->blur && c->blur->glass
+						 ? c->glass_radius
+						 : config.border_radius;
+	struct fx_corner_radii current_corner_location = corner_radii_all(radius);
 
 	if (client_no_radius_active(c))
 		return corner_radii_none();
@@ -104,21 +122,19 @@ struct fx_corner_radii set_client_corner_location(Client *c) {
 
 	struct wlr_box target_geom =
 		client_animations_enabled(c) ? c->animation.current : c->geom;
-	if (target_geom.x + config.border_radius <= c->mon->m.x) {
+	if (target_geom.x + radius <= c->mon->m.x) {
 		current_corner_location.top_left = 0;
 		current_corner_location.bottom_left = 0;
 	}
-	if (target_geom.x + target_geom.width - config.border_radius >=
-		c->mon->m.x + c->mon->m.width) {
+	if (target_geom.x + target_geom.width - radius >= c->mon->m.x + c->mon->m.width) {
 		current_corner_location.top_right = 0;
 		current_corner_location.bottom_right = 0;
 	}
-	if (target_geom.y + config.border_radius <= c->mon->m.y) {
+	if (target_geom.y + radius <= c->mon->m.y) {
 		current_corner_location.top_left = 0;
 		current_corner_location.top_right = 0;
 	}
-	if (target_geom.y + target_geom.height - config.border_radius >=
-		c->mon->m.y + c->mon->m.height) {
+	if (target_geom.y + target_geom.height - radius >= c->mon->m.y + c->mon->m.height) {
 		current_corner_location.bottom_left = 0;
 		current_corner_location.bottom_right = 0;
 	}
@@ -330,7 +346,7 @@ void buffer_set_effect(Client *c, BufferData data) {
 	if (client_no_radius_active(c))
 		data.corner_location = corner_radii_none();
 
-	if (config.blur && !c->no_blur)
+	if (config.blur && (!c->no_blur || c->blur->glass))
 		wlr_scene_blur_set_corner_radii(c->blur, data.corner_location);
 
 	/* Overview cards get rounded corners directly. */
@@ -598,6 +614,8 @@ void client_draw_dim(Client *c, struct ivec2 clip_box) {
 }
 
 void client_draw_blur(Client *c, struct ivec2 clip_box) {
+	bool glass = c->blur->glass;
+
 	if (c->isfullscreen && !client_uses_transparent_rendering(c)) {
 		if (c->blur->node.enabled)
 			wlr_scene_node_set_enabled(&c->blur->node, false);
@@ -609,7 +627,7 @@ void client_draw_blur(Client *c, struct ivec2 clip_box) {
 	int32_t blur_width = 0;
 	int32_t blur_height = 0;
 
-	if (config.blur && !c->no_blur) {
+	if (config.blur && (!c->no_blur || glass)) {
 
 		if (client_is_ignore_output_clip(c)) {
 			blur_x = c->bw;
@@ -633,6 +651,9 @@ void client_draw_blur(Client *c, struct ivec2 clip_box) {
 		wlr_scene_node_set_enabled(&c->blur->node, true);
 		wlr_scene_node_set_position(&c->blur->node, blur_x, blur_y);
 		wlr_scene_blur_set_size(c->blur, blur_width, blur_height);
+		if (glass)
+			wlr_scene_blur_set_corner_radii(c->blur,
+											set_client_corner_location(c));
 	} else {
 		wlr_scene_node_set_enabled(&c->blur->node, false);
 	}
@@ -1274,8 +1295,19 @@ void fadeout_client_animation_next_tick(Client *c) {
 		wlr_scene_node_for_each_buffer(&c->scene->node,
 									   scene_buffer_apply_opacity, &opacity);
 
+	if (c->blur && config.animation_fade_out && !c->no_fade_out) {
+		wlr_scene_blur_set_strength(c->blur, opacity);
+		wlr_scene_blur_set_alpha(c->blur, opacity);
+	}
+
 	if (c->mon) {
 		bool scaling = client_close_animation_type(c) == ANIM_TYPE_ZOOM;
+		/* Both the snapshot buffers and glass zoom within the content box,
+		 * not the outer size that includes the window frame. */
+		if (scaling && c->blur) {
+			width = MAX(1, width - 2 * (int32_t)c->bw);
+			height = MAX(1, height - 2 * (int32_t)c->bw);
+		}
 		scene_snapshot_clip_to_box(c->scene, &c->mon->m, scaling, width,
 								   height);
 	}
@@ -1397,6 +1429,18 @@ void init_fadeout_client(Client *c) {
 	if (!fadeout_client->scene) {
 		free(fadeout_client);
 		return;
+	}
+
+	/* The surface is already unmapped, so retain the last rendered glass state
+	 * rather than inspecting its now-detached client buffer. */
+	if (c->blur && c->blur->glass && c->blur->node.enabled) {
+		fadeout_client->blur =
+			scene_snapshot_add_glass(fadeout_client->scene, c->blur);
+		if (!fadeout_client->blur) {
+			wlr_scene_node_destroy(&fadeout_client->scene->node);
+			free(fadeout_client);
+			return;
+		}
 	}
 
 	fadeout_client->animation.duration = config.animation_duration_close;
@@ -1815,8 +1859,8 @@ void client_set_focused_opacity_animation(Client *c) {
 }
 
 bool client_set_focus_opacity(Client *c) {
-	if (config.blur && !c->no_blur && c->blur_opacity != 1.0f &&
-		c->animation.action != OPEN) {
+	if (config.blur && (!c->no_blur || c->blur->glass) &&
+		c->blur_opacity != 1.0f && c->animation.action != OPEN) {
 		c->blur_opacity = 1.0f;
 		wlr_scene_blur_set_strength(c->blur, 1.0f);
 		wlr_scene_blur_set_alpha(c->blur, 1.0f);
@@ -1876,7 +1920,8 @@ bool client_set_focus_opacity(Client *c) {
 
 		c->opacity_animation.current_opacity = target_opacity;
 		client_set_opacity(c, target_opacity);
-		if (config.blur && !c->no_blur && !client_blur_uses_wallpaper(c)) {
+		if (config.blur && (!c->no_blur || c->blur->glass) &&
+			!client_blur_uses_wallpaper(c)) {
 			float blur_val = MIN(percent * (1.0 - config.fadein_begin_opacity) +
 									 config.fadein_begin_opacity,
 								 1.0);

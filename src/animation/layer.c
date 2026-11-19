@@ -458,7 +458,9 @@ void layer_animation_next_tick(LayerSurface *l) {
 							   1.0f);
 
 	if (config.animation_fade_in) {
-		if (config.blur && !l->no_blur && !layer_blur_uses_wallpaper(l)) {
+		// Glass fades with its layer even over the wallpaper-only blur
+		if (config.blur && l->blur &&
+			(l->glass || (!l->no_blur && !layer_blur_uses_wallpaper(l)))) {
 			wlr_scene_blur_set_strength(l->blur, opacity);
 			wlr_scene_blur_set_alpha(l->blur, opacity);
 		}
@@ -497,7 +499,8 @@ void layer_animation_next_tick(LayerSurface *l) {
 		.height = animated.height,
 	};
 
-	if (config.blur && config.blur_layer && !l->no_blur && l->blur)
+	if (config.blur && l->blur &&
+		(l->glass || (config.blur_layer && !l->no_blur)))
 		wlr_scene_blur_set_size(l->blur, l->animation.current.width,
 								l->animation.current.height);
 

@@ -292,10 +292,13 @@ void switcher_layout(void) {
 }
 
 void switcher_apply_highlight(void) {
+	const float *highlight = config.switcher_highlight_color[3] < 0.0f
+								 ? config.focuscolor
+								 : config.switcher_highlight_color;
 	for (int i = 0; i < switcher_state.count; i++)
 		wlr_scene_rect_set_color(
 			switcher_state.tiles[i]->frame,
-			i == switcher_state.index ? config.focuscolor : config.bordercolor);
+			i == switcher_state.index ? highlight : config.bordercolor);
 }
 
 void switcher_close(void) {
