@@ -22,18 +22,16 @@ static int32_t layer_close_animation_type(const LayerSurface *l) {
 			   : config.layer_animation_type_close;
 }
 
-static void layer_expand_origin(LayerSurface *l) {
+static void layer_expand_origin(LayerSurface *l, const struct wlr_box *box) {
 	uint32_t anchor = l->layer_surface->current.anchor;
 	bool left = anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT;
 	bool right = anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT;
 	bool top = anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP;
 	bool bottom = anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM;
-	l->expand_origin_x = l->geom.x +
-						 (left != right ? (right ? l->geom.width : 0)
-										: l->geom.width / 2.0);
-	l->expand_origin_y = l->geom.y +
-						 (top != bottom ? (bottom ? l->geom.height : 0)
-										: l->geom.height / 2.0);
+	l->expand_origin_x =
+		box->x + (left != right ? (right ? box->width : 0) : box->width / 2.0);
+	l->expand_origin_y = box->y + (top != bottom ? (bottom ? box->height : 0)
+												 : box->height / 2.0);
 }
 
 static int32_t layer_expand_radius(LayerSurface *l,
@@ -63,8 +61,9 @@ static void layer_expand_glass(LayerSurface *l, const struct wlr_box *box,
 									box->y);
 		wlr_scene_node_set_position(&l->blur->node, 0, 0);
 	} else {
-		wlr_scene_node_set_position(&l->blur->node, box->x - l->geom.x,
-									box->y - l->geom.y);
+		int32_t x, y;
+		wlr_scene_node_coords(&l->scene->node, &x, &y);
+		wlr_scene_node_set_position(&l->blur->node, box->x - x, box->y - y);
 	}
 	wlr_scene_blur_set_size(l->blur, box->width, box->height);
 	wlr_scene_blur_set_corner_radius(l->blur, layer_expand_radius(l, box));
@@ -74,7 +73,7 @@ static void layer_expand_glass(LayerSurface *l, const struct wlr_box *box,
 }
 
 void layer_actual_size(LayerSurface *l, int32_t *width, int32_t *height) {
-	if (l->animation.running) {
+	if (l->animation.running || l->expand_opening) {
 		*width = l->animation.current.width;
 		*height = l->animation.current.height;
 	} else {
@@ -288,8 +287,13 @@ void layer_draw_shield(LayerSurface *l) {
 			return;
 		}
 
+		int32_t x, y;
+		wlr_scene_node_coords(&l->scene->node, &x, &y);
+		const struct wlr_box *box = l->animation.running || l->expand_opening
+										? &l->animation.current
+										: &l->geom;
 		wlr_scene_node_raise_to_top(&l->shield->node);
-		wlr_scene_node_set_position(&l->shield->node, 0, 0);
+		wlr_scene_node_set_position(&l->shield->node, box->x - x, box->y - y);
 		wlr_scene_rect_set_size(l->shield, width, height);
 		wlr_scene_node_set_enabled(&l->shield->node, true);
 	} else {
@@ -500,10 +504,12 @@ static bool layer_apply_output_clip(LayerSurface *l,
 	return true;
 }
 
-static void layer_expand_frame(LayerSurface *l, double progress) {
-	struct wlr_box box = expand_box_at(
-		&l->geom, l->expand_origin_x, l->expand_origin_y, progress);
-	wlr_scene_node_set_position(&l->scene->node, l->geom.x, l->geom.y);
+static void layer_expand_frame(LayerSurface *l, const struct wlr_box *geometry,
+							   double progress) {
+	layer_expand_origin(l, geometry);
+	struct wlr_box box = expand_box_at(geometry, l->expand_origin_x,
+									   l->expand_origin_y, progress);
+	wlr_scene_node_set_position(&l->scene->node, geometry->x, geometry->y);
 
 	struct wlr_scene_tree *surface_tree = layer_surface_tree(l);
 	struct wlr_box visible;
@@ -526,6 +532,7 @@ static void layer_expand_frame(LayerSurface *l, double progress) {
 	}
 	layer_expand_glass(l, &box, progress, false);
 	l->expand_progress = progress;
+	l->expand_geometry = *geometry;
 	l->animation.current = box;
 }
 
@@ -548,10 +555,38 @@ void layer_animation_next_tick(LayerSurface *l) {
 	int32_t type = l->animation.action == NONE ? MOVE : l->animation.action;
 	double factor = find_animation_curve_at(animation_passed, type);
 
-	if (l->animation.action == OPEN &&
-		layer_open_animation_type(l) == ANIM_TYPE_EXPAND) {
-		layer_expand_frame(l, factor);
-		goto finish;
+	if (l->expand_opening) {
+		struct wlr_box geometry = l->geom;
+		if (l->animation.action == MOVE && l->animation.running) {
+			geometry = (struct wlr_box){
+				.x = l->animation.initial.x +
+					 (l->current.x - l->animation.initial.x) * factor,
+				.y = l->animation.initial.y +
+					 (l->current.y - l->animation.initial.y) * factor,
+				.width =
+					l->animation.initial.width +
+					(l->current.width - l->animation.initial.width) * factor,
+				.height =
+					l->animation.initial.height +
+					(l->current.height - l->animation.initial.height) * factor,
+			};
+		}
+		double open_passed =
+			l->expand_duration
+				? (double)(timespec_to_ms(&now) - l->expand_time_started) /
+					  l->expand_duration
+				: 1.0;
+		double progress = find_animation_curve_at(open_passed, OPEN);
+		layer_expand_frame(l, &geometry, progress);
+		if (animation_passed >= 1.0)
+			l->animation.running = false;
+		if (open_passed >= 1.0) {
+			l->expand_opening = false;
+			l->animation.action = MOVE;
+			glass_lens_apply(l->layer_surface->surface);
+		}
+		l->need_output_flush = l->animation.running || l->expand_opening;
+		return;
 	}
 
 	int32_t width = l->animation.initial.width +
@@ -621,7 +656,6 @@ void layer_animation_next_tick(LayerSurface *l) {
 								l->animation.current.height);
 	}
 
-finish:
 	if (animation_passed >= 1.0) {
 		l->animation.running = false;
 		l->need_output_flush = false;
@@ -673,12 +707,12 @@ void init_fadeout_layers(LayerSurface *l) {
 	fadeout_layer->close_opacity = config.fadeout_begin_opacity;
 	fadeout_layer->glass = l->glass;
 	fadeout_layer->glass_radius = l->glass_radius;
-	layer_expand_origin(l);
+	bool opening_expand = l->expand_opening;
+	struct wlr_box close_geometry =
+		opening_expand ? l->expand_geometry : l->animation.current;
+	layer_expand_origin(l, &close_geometry);
 	fadeout_layer->expand_origin_x = l->expand_origin_x;
 	fadeout_layer->expand_origin_y = l->expand_origin_y;
-	bool opening_expand = l->animation.running &&
-						  l->animation.action == OPEN &&
-						  layer_open_animation_type(l) == ANIM_TYPE_EXPAND;
 	fadeout_layer->expand_progress = opening_expand ? l->expand_progress : 1.0;
 	if (opening_expand)
 		fadeout_layer->close_opacity =
@@ -694,7 +728,7 @@ void init_fadeout_layers(LayerSurface *l) {
 	fadeout_layer->animation_type_open = l->animation_type_open;
 
 	if (layer_close_animation_type(l) == ANIM_TYPE_EXPAND) {
-		fadeout_layer->geom = l->geom;
+		fadeout_layer->geom = close_geometry;
 		/* Snapshot buffers keep their layout positions: only their clip
 		 * shrinks, so even an interrupted open never scales the text. */
 		goto start;
@@ -770,7 +804,7 @@ void layer_set_pending_state(LayerSurface *l) {
 		if (l->animation.duration == 0) {
 			l->animainit_geom = l->geom;
 		} else if (layer_open_animation_type(l) == ANIM_TYPE_EXPAND) {
-			layer_expand_origin(l);
+			layer_expand_origin(l, &l->geom);
 			l->expand_progress = 0.0;
 			l->animainit_geom = expand_box_at(
 				&l->geom, l->expand_origin_x, l->expand_origin_y, 0.0);
@@ -792,7 +826,8 @@ void layer_set_pending_state(LayerSurface *l) {
 			l->animainit_geom.height = l->geom.height;
 		}
 	} else {
-		l->animainit_geom = l->animation.current;
+		l->animainit_geom =
+			l->expand_opening ? l->expand_geometry : l->animation.current;
 	}
 	if (!config.animations || !config.layer_animations || l->no_animation ||
 		l->layer_surface->current.layer ==
@@ -825,6 +860,13 @@ void layer_commit(LayerSurface *l) {
 
 		l->animation.initial = l->animainit_geom;
 		l->animation.time_started = get_now_in_ms();
+		if (l->animation.action == OPEN &&
+			layer_open_animation_type(l) == ANIM_TYPE_EXPAND) {
+			l->expand_opening = true;
+			l->expand_time_started = l->animation.time_started;
+			l->expand_duration = l->animation.duration;
+			l->expand_geometry = l->geom;
+		}
 
 		// mark the animation start
 		l->animation.running = true;
@@ -846,8 +888,8 @@ bool layer_draw_frame(LayerSurface *l) {
 		return false;
 	}
 
-	if (config.animations && config.layer_animations && l->animation.running &&
-		!l->no_animation) {
+	if (config.animations && config.layer_animations &&
+		(l->animation.running || l->expand_opening) && !l->no_animation) {
 		layer_animation_next_tick(l);
 		layer_draw_shield(l);
 		layer_draw_shadow(l);

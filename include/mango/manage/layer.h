@@ -33,6 +33,10 @@ typedef struct LayerSurface {
 	/* Keep the opening phase when an unmap interrupts the growing slab. */
 	double expand_origin_x, expand_origin_y;
 	double expand_progress;
+	/* Restacking retargets MOVE without restarting this independent reveal. */
+	struct wlr_box expand_geometry;
+	uint32_t expand_time_started, expand_duration;
+	bool expand_opening;
 	double close_opacity, close_strength, close_alpha;
 	bool dirty;
 	int32_t no_blur;

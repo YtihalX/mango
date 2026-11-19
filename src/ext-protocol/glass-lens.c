@@ -44,7 +44,8 @@ static void show_lens(struct glass_lens *lens,
 		glass = l ? l->blur : NULL;
 		/* The mapping commit can precede the glass node. Keep the synced
 		 * state, but do not draw a lens ahead of its opening slab. */
-		if (l && l->animation.running && l->animation.action == OPEN)
+		if (l && (l->expand_opening ||
+				  (l->animation.running && l->animation.action == OPEN)))
 			state = NULL;
 	} else if (xdg_popup) {
 		Popup *popup = xdg_popup->base->data;
