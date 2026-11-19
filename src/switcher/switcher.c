@@ -89,6 +89,15 @@ static int switcher_motion_tick(void *data) {
 	return 0;
 }
 
+/* The alpha a title rect fades towards. On glass the rects are clear and stay
+ * enabled only to take input. */
+static float switcher_title_rect_alpha(bool border) {
+	if (config.title_message_bardata.glass)
+		return 0.0f;
+	return border ? config.title_message_bardata.border_color[3]
+				  : config.title_message_bardata.focus_bg_color[3];
+}
+
 static void switcher_title_opacity(struct wlr_scene_tree *tree,
 								   double opacity) {
 	struct wlr_scene_node *node;
@@ -106,10 +115,10 @@ static void switcher_title_opacity(struct wlr_scene_tree *tree,
 			memcpy(color, rect->color, sizeof(color));
 			/* Title rects use these two colours; do not compound their alpha.
 			 */
-			color[3] = opacity *
-					   (rect == switcher_state.mon->title_message_bar->border
-							? config.title_message_bardata.border_color[3]
-							: config.title_message_bardata.focus_bg_color[3]);
+			color[3] =
+				opacity *
+				switcher_title_rect_alpha(
+					rect == switcher_state.mon->title_message_bar->border);
 			wlr_scene_rect_set_color(rect, color);
 		}
 	}
@@ -586,6 +595,8 @@ void switcher_close(void) {
 							: config.title_message_bardata.focus_bg_color;
 					memcpy(motion->title_rects[i].color, color,
 						   sizeof(float) * 4);
+					motion->title_rects[i].color[3] = switcher_title_rect_alpha(
+						source == m->title_message_bar->border);
 					struct wlr_scene_rect *rect =
 						wlr_scene_rect_create(motion->title, source->width,
 											  source->height, source->color);
