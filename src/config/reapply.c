@@ -124,6 +124,8 @@ void reapply_property(void) {
 			 * rules remain map-only and must not be consumed by existing clients. */
 			c->glass = 0;
 			c->glass_radius = -1;
+			c->popup_glass = 0;
+			c->popup_glass_radius = -1;
 			const char *appid = client_get_appid(c);
 			const char *title = client_get_title(c);
 			for (int32_t i = 0; i < config.window_rules_count; i++) {
@@ -134,12 +136,25 @@ void reapply_property(void) {
 					continue;
 				APPLY_INT_PROP(c, r, glass);
 				APPLY_INT_PROP(c, r, glass_radius);
+				APPLY_INT_PROP(c, r, popup_glass);
+				APPLY_INT_PROP(c, r, popup_glass_radius);
 			}
 			client_sync_blur_optimized(c);
 			if (c->glass)
 				c->need_output_flush = true;
 			client_set_group_config(c);
 			client_set_tab_bar_config(c);
+		}
+	}
+
+	/* Popups read their root's popup glass on each commit. */
+	Monitor *m = NULL;
+	wl_list_for_each(m, &server.monitors, link) {
+		for (int32_t i = 0; i < 4; i++) {
+			LayerSurface *l = NULL;
+			wl_list_for_each(l, &m->layers[i], link) {
+				layer_apply_popup_glass_rules(l);
+			}
 		}
 	}
 }

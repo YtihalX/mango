@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
+#include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/addon.h>
 
 /* A lens's double-buffered state, kept with the surface's own state, so that
@@ -25,17 +26,38 @@ struct glass_lens {
 };
 
 /* Shows `state`, or no lens when it is null, in the glass of the lens's layer
- * surface. The glass only exists while the layer is mapped, so every commit
- * applies the lens again; setting the same lens twice does nothing. */
+ * surface or popup. That glass comes and goes with its surface, so every
+ * commit applies the lens again; setting the same lens twice does nothing. A
+ * popup's glass starts at the corner of its window geometry, not of its
+ * surface. */
 static void show_lens(struct glass_lens *lens,
 					  const struct glass_lens_state *state) {
+	struct wlr_scene_blur *glass = NULL;
+	struct wlr_box offset = {0};
 	struct wlr_layer_surface_v1 *layer_surface =
 		wlr_layer_surface_v1_try_from_wlr_surface(lens->surface);
-	LayerSurface *l = layer_surface ? layer_surface->data : NULL;
-	if (l && l->blur)
-		wlr_scene_blur_set_glass_lens(l->blur, state ? &state->box : NULL,
-									  state ? state->radius : 0,
-									  state ? &state->clip : NULL);
+	struct wlr_xdg_popup *xdg_popup =
+		wlr_xdg_popup_try_from_wlr_surface(lens->surface);
+	if (layer_surface) {
+		LayerSurface *l = layer_surface->data;
+		glass = l ? l->blur : NULL;
+	} else if (xdg_popup) {
+		Popup *popup = xdg_popup->base->data;
+		glass = popup ? popup->glass : NULL;
+		offset = xdg_popup->base->current.geometry;
+	}
+	if (!glass)
+		return;
+	if (!state) {
+		wlr_scene_blur_set_glass_lens(glass, NULL, 0, NULL);
+		return;
+	}
+	struct wlr_box box = state->box, clip = state->clip;
+	box.x -= offset.x;
+	box.y -= offset.y;
+	clip.x -= offset.x;
+	clip.y -= offset.y;
+	wlr_scene_blur_set_glass_lens(glass, &box, state->radius, &clip);
 }
 
 static void handle_lens_commit(struct wlr_surface_synced *synced) {

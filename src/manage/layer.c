@@ -241,6 +241,7 @@ void handle_layer_surface_map(struct wl_listener *listener, void *data) {
 			APPLY_INT_PROP(l, r, animation_type_close);
 		}
 	}
+	layer_apply_popup_glass_rules(l);
 
 	// Initializes the shield.
 	l->shield =
@@ -446,14 +447,114 @@ bool popup_unconstrain(Popup *popup) {
 	return false;
 }
 
+void layer_apply_popup_glass_rules(LayerSurface *l) {
+	l->popup_glass = 0;
+	l->popup_glass_radius = -1;
+	for (int32_t i = 0; i < config.layer_rules_count; i++) {
+		ConfigLayerRule *r = &config.layer_rules[i];
+		if (regex_match(r->layer_name, l->layer_surface->namespace)) {
+			APPLY_INT_PROP(l, r, popup_glass);
+			APPLY_INT_PROP(l, r, popup_glass_radius);
+		}
+	}
+}
+
+/* Whether the rule of the window or layer surface at the root of a popup's
+ * parent chain gives its popups glass, and with which corner radius. */
+static bool popup_glass_rule(struct wlr_xdg_popup *wlr_popup, int32_t *radius) {
+	Client *c = NULL;
+	LayerSurface *l = NULL;
+	int32_t type = toplevel_from_wlr_surface(wlr_popup->base->surface, &c, &l);
+	int32_t glass = 0;
+	*radius = -1;
+	if (type == LayerShell && l) {
+		glass = l->popup_glass;
+		*radius = l->popup_glass_radius;
+	} else if (type != LayerShell && type >= 0 && c) {
+		glass = c->popup_glass;
+		*radius = c->popup_glass_radius;
+	}
+	if (*radius < 0)
+		*radius = 12;
+	return config.blur && glass;
+}
+
+/*
+ * Glass shows wherever a popup is not painted, so only menus that leave
+ * themselves translucent get it. Menus and popovers take a grab, tooltips
+ * don't. A solid popup's opaque region covers the middle of its window
+ * geometry: GTK4 trims its corners from it by more than a glass radius along
+ * one side, GTK3 rounds them, and a translucent menu sends none.
+ */
+static bool popup_is_translucent_menu(struct wlr_xdg_popup *wlr_popup) {
+	struct wlr_surface *surface = wlr_popup->base->surface;
+	const struct wlr_box *geometry = &wlr_popup->base->geometry;
+	if (!wlr_popup->seat || !surface->mapped || !surface->buffer ||
+		wlr_box_empty(geometry))
+		return false;
+	if (wlr_buffer_is_opaque(&surface->buffer->base))
+		return false;
+	return !pixman_region32_contains_point(
+		&surface->opaque_region, geometry->x + geometry->width / 2,
+		geometry->y + geometry->height / 2, NULL);
+}
+
+static void handle_popup_glass_destroy(struct wl_listener *listener,
+									   void *data) {
+	Popup *popup = wl_container_of(listener, popup, glass_destroy);
+	wl_list_remove(&popup->glass_destroy.link);
+	popup->glass = NULL;
+}
+
+/*
+ * Puts glass under a popup, shaped by its window geometry: the popup's scene
+ * tree starts at the geometry's corner, so a CSD shadow outside it gets none.
+ * The glass lives in that tree, below the popup's surface and its child
+ * popups, and goes with it.
+ */
+static void popup_update_glass(Popup *popup) {
+	struct wlr_xdg_popup *wlr_popup = popup->wlr_popup;
+	struct wlr_scene_tree *tree =
+		wlr_popup ? wlr_popup->base->surface->data : NULL;
+	int32_t radius;
+	if (!tree || !popup_glass_rule(wlr_popup, &radius) ||
+		!popup_is_translucent_menu(wlr_popup)) {
+		if (popup->glass)
+			wlr_scene_node_set_enabled(&popup->glass->node, false);
+		return;
+	}
+
+	if (!popup->glass) {
+		popup->glass = wlr_scene_blur_create(tree, 0, 0);
+		if (!popup->glass)
+			return;
+		wlr_scene_node_lower_to_bottom(&popup->glass->node);
+		wlr_scene_blur_set_glass(popup->glass, true);
+		popup->glass_destroy.notify = handle_popup_glass_destroy;
+		wl_signal_add(&popup->glass->node.events.destroy,
+					  &popup->glass_destroy);
+	}
+	const struct wlr_box *geometry = &wlr_popup->base->geometry;
+	radius = MIN(radius, MIN(geometry->width, geometry->height) / 2);
+	wlr_scene_blur_set_size(popup->glass, geometry->width, geometry->height);
+	wlr_scene_blur_set_corner_radius(popup->glass, radius);
+	wlr_scene_node_set_enabled(&popup->glass->node, true);
+}
+
 void handle_popup_destroy(struct wl_listener *listener, void *data) {
 	Popup *popup = wl_container_of(listener, popup, destroy);
 	wl_list_remove(&popup->destroy.link);
 	wl_list_remove(&popup->reposition.link);
+	wl_list_remove(&popup->surface_commit.link);
 	if (popup->commit.notify != NULL) {
 		wl_list_remove(&popup->commit.link);
 		popup->commit.notify = NULL;
 	}
+	// The glass goes with the popup's scene tree
+	if (popup->glass)
+		wl_list_remove(&popup->glass_destroy.link);
+	if (popup->wlr_popup)
+		popup->wlr_popup->base->data = NULL;
 	if (server.selected_monitor && server.selected_monitor->sel)
 		client_focus(server.selected_monitor->sel, 1);
 	free(popup);
@@ -494,9 +595,17 @@ cleanup_popup_commit:
 	}
 }
 
+// Every commit: the buffer, opaque region or geometry may have changed
+static void handle_popup_glass_commit(struct wl_listener *listener,
+									  void *data) {
+	Popup *popup = wl_container_of(listener, popup, surface_commit);
+	popup_update_glass(popup);
+}
+
 void handle_popup_reposition(struct wl_listener *listener, void *data) {
 	Popup *popup = wl_container_of(listener, popup, reposition);
 	(void)popup_unconstrain(popup);
+	popup_update_glass(popup);
 }
 
 void handle_new_xdg_popup(struct wl_listener *listener, void *data) {
@@ -507,12 +616,17 @@ void handle_new_xdg_popup(struct wl_listener *listener, void *data) {
 		return;
 
 	popup->type = XdgPopup;
+	wlr_popup->base->data = popup;
 
 	popup->destroy.notify = handle_popup_destroy;
 	wl_signal_add(&wlr_popup->events.destroy, &popup->destroy);
 
 	popup->commit.notify = handle_popup_commit;
 	wl_signal_add(&wlr_popup->base->surface->events.commit, &popup->commit);
+
+	popup->surface_commit.notify = handle_popup_glass_commit;
+	wl_signal_add(&wlr_popup->base->surface->events.commit,
+				  &popup->surface_commit);
 
 	popup->reposition.notify = handle_popup_reposition;
 	wl_signal_add(&wlr_popup->events.reposition, &popup->reposition);

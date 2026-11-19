@@ -65,6 +65,8 @@ window_rule_once=Parameter:Values,Parameter:Values,app_id:Values,title:Values
 | `no_blur` | integer | `0` / `1` | Window does not have blur effect |
 | `glass` | integer | `0` / `1` | Refract the real backdrop beneath translucent window content. Requires `blur=1`; glass takes precedence over `no_blur`. |
 | `glass_radius` | integer | `0` and up | Corner radius for a glass window; defaults to `border_radius`. |
+| `popup_glass` | integer | `0` / `1` | Glass under the window's menus, nested ones included, shaped by each menu's window geometry. Only menus that take a grab and leave the middle of their geometry translucent get it: solid menus and tooltips stay as they are. Requires `blur=1`. |
+| `popup_glass_radius` | integer | `0` and up | Corner radius for popup glass; defaults to `12`. |
 | `no_border` | integer | `0` / `1` | Remove window border |
 | `no_shadow` | integer | `0` / `1` | Not apply shadow |
 | `no_radius` | integer | `0` / `1` | Not apply corner radius |
@@ -253,6 +255,8 @@ layer_rule=layer_name:Values,Parameter:Values,Parameter:Values
 | `no_blur` | integer | `0` / `1` | Disable blur |
 | `no_animation` | integer | `0` / `1` | Disable layer animation |
 | `no_shadow` | integer | `0` / `1` | Disable layer shadow |
+| `popup_glass` | integer | `0` / `1` | Glass under the layer's menus, as the window rule `popup_glass` does it. |
+| `popup_glass_radius` | integer | `0` and up | Corner radius for the layer's popup glass; defaults to `12`. |
 | `shield_when_capture`| integer | `0` / `1` | Shield layer when captured.(it is better to combination with `no_animation:1`) |
 
 > **Tip:** For animation types, see [Animations](/docs/visuals/animations#animation-types). For visual effects, see [Window Effects](/docs/visuals/effects).

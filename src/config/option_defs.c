@@ -1409,6 +1409,8 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 		// Unset, so a later rule for the same layer keeps an earlier one's glass
 		rule->glass = -1;
 		rule->glass_radius = -1;
+		rule->popup_glass = -1;
+		rule->popup_glass_radius = -1;
 
 		bool parse_error = false;
 		char *token = strtok(value, ",");
@@ -1441,6 +1443,10 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 					rule->glass = CLAMP_INT(atoi(val), 0, 1);
 				} else if (strcmp(key, "glass_radius") == 0) {
 					rule->glass_radius = CLAMP_INT(atoi(val), 0, 10000);
+				} else if (strcmp(key, "popup_glass") == 0) {
+					rule->popup_glass = CLAMP_INT(atoi(val), 0, 1);
+				} else if (strcmp(key, "popup_glass_radius") == 0) {
+					rule->popup_glass_radius = CLAMP_INT(atoi(val), 0, 10000);
 				} else {
 					mango_error(false, WLR_ERROR,
 								"Unknown "
@@ -1517,6 +1523,8 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 		rule->no_blur = -1;
 		rule->glass = -1;
 		rule->glass_radius = -1;
+		rule->popup_glass = -1;
+		rule->popup_glass_radius = -1;
 		rule->no_focus = -1;
 		rule->no_fade_in = -1;
 		rule->no_fade_out = -1;
@@ -1651,6 +1659,10 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 					rule->glass = CLAMP_INT(atoi(val), 0, 1);
 				} else if (strcmp(key, "glass_radius") == 0) {
 					rule->glass_radius = CLAMP_INT(atoi(val), 0, 10000);
+				} else if (strcmp(key, "popup_glass") == 0) {
+					rule->popup_glass = CLAMP_INT(atoi(val), 0, 1);
+				} else if (strcmp(key, "popup_glass_radius") == 0) {
+					rule->popup_glass_radius = CLAMP_INT(atoi(val), 0, 10000);
 				} else if (strcmp(key, "scroller_proportion") == 0) {
 					rule->scroller_proportion = atof(val);
 				} else if (strcmp(key, "is_fullscreen") == 0) {

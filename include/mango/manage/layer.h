@@ -36,6 +36,8 @@ typedef struct LayerSurface {
 	int32_t no_shadow;
 	int32_t glass;
 	int32_t glass_radius;
+	int32_t popup_glass;
+	int32_t popup_glass_radius;
 	int32_t animation_type_open;
 	int32_t animation_type_close;
 	bool shield_when_capture;
@@ -46,9 +48,13 @@ typedef struct LayerSurface {
 typedef struct Popup {
 	uint32_t type; // must at first in struct
 	struct wlr_xdg_popup *wlr_popup;
+	// Under the popup in its scene tree, made once its root's rule asks for it
+	struct wlr_scene_blur *glass;
 	struct wl_listener destroy;
 	struct wl_listener commit;
 	struct wl_listener reposition;
+	struct wl_listener surface_commit;
+	struct wl_listener glass_destroy;
 } Popup;
 
 void arrange_layer(Monitor *m, struct wl_list *list,
@@ -62,6 +68,8 @@ bool layer_blur_uses_wallpaper(LayerSurface *l);
 void layer_flush_blur_background(LayerSurface *l);
 void handle_layer_surface_map(struct wl_listener *listener, void *data);
 void handle_layer_surface_commit(struct wl_listener *listener, void *data);
+/* Reads the popup_glass keys of the layer rules that match the layer. */
+void layer_apply_popup_glass_rules(LayerSurface *l);
 bool popup_unconstrain(Popup *popup);
 void handle_popup_destroy(struct wl_listener *listener, void *data);
 void handle_popup_commit(struct wl_listener *listener, void *data);
