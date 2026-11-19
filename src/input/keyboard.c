@@ -25,6 +25,9 @@
 #include <wlr/xwayland.h>
 #endif
 
+/* Synthetic modifier resets must not finish another keyboard's switcher. */
+static KeyboardGroup *switcher_keyboard_owner;
+
 void handle_keyboard_key_watch(struct wl_listener *listener, void *data) {
 	InputDevice *id = wl_container_of(listener, id, key_watch);
 	ipc_notify_device_event(id->wlr_device);
@@ -444,6 +447,8 @@ uint32_t keyboard_hard_modifiers(void) {
 void handle_standalone_keyboard_destroy(struct wl_listener *listener,
 										void *data) {
 	KeyboardGroup *group = wl_container_of(listener, group, destroy);
+	if (group == switcher_keyboard_owner)
+		switcher_keyboard_owner = NULL;
 	if (group->keyboard == server.last_active_keyboard)
 		server.last_active_keyboard = NULL;
 	invalidate_saved_seat_keyboard(group->keyboard);
@@ -534,6 +539,8 @@ KeyboardGroup *keyboard_group_create(void) {
 
 void keyboard_group_destroy(struct wl_listener *listener, void *data) {
 	KeyboardGroup *group = wl_container_of(listener, group, destroy);
+	if (group == switcher_keyboard_owner)
+		switcher_keyboard_owner = NULL;
 	if (group->keyboard == server.last_active_keyboard)
 		server.last_active_keyboard = NULL;
 	wl_list_remove(&group->link);
@@ -731,10 +738,13 @@ void handle_keyboard_key(struct wl_listener *listener, void *data) {
 		toggle_overview(&(Arg){0});
 	}
 
+	bool switcher_was_active = switcher_is_active();
 	if (switcher_is_active()) {
 		if (server.session_locked) {
 			switcher_close();
-		} else if (event->state == WL_KEYBOARD_KEY_STATE_RELEASED &&
+		} else if ((!group->virtual_keyboard ||
+					group == switcher_keyboard_owner) &&
+				   event->state == WL_KEYBOARD_KEY_STATE_RELEASED &&
 				   ISMODEKEYCODE(keycode)) {
 			switcher_commit();
 			group->nsyms = 0;
@@ -758,6 +768,10 @@ void handle_keyboard_key(struct wl_listener *listener, void *data) {
 		handled = keyboard_check_keybinding(event->state, server.session_locked,
 											mods, syms[i], keycode) ||
 				  handled;
+	if (!switcher_was_active && switcher_is_active())
+		switcher_keyboard_owner = group;
+	else if (!switcher_is_active())
+		switcher_keyboard_owner = NULL;
 
 	/* The press was swallowed, so swallow its release too. */
 	if (event->state == WL_KEYBOARD_KEY_STATE_RELEASED &&

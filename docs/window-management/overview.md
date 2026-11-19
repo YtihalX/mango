@@ -207,11 +207,15 @@ slab covers every row, thumbnails keep `border_radius`, and a lens marks the
 chosen tile. The slab and lens use the global glass and blur settings.
 
 Glass expands from the panel centre using the open duration and curve. Releasing
-the modifier focuses the chosen window immediately, while the panel and title
-shrink using the close duration and curve. Releasing during the open reverses
-from its current size; another Alt+Tab can open above the closing panel.
+the modifier focuses the chosen window immediately. The panel shrinks using the
+close duration and curve, while the title fades in place as the reverse of its
+open. Releasing during the open reverses from the current progress; another
+Alt+Tab can open above the closing panel.
 The shared title message bar's glass is controlled independently by
 `title_message_bar_decorate_glass`.
+Physical modifier releases keep their usual behaviour. A virtual keyboard may
+release only the switcher it opened, so input-method modifier resets cannot
+commit a switcher opened by another keyboard.
 
 | Setting | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
