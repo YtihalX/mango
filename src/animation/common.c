@@ -554,3 +554,28 @@ void request_fresh_all_monitors(void) {
 		wlr_output_schedule_frame(m->wlr_output);
 	}
 }
+
+struct wlr_box expand_box_at(const struct wlr_box *final, double origin_x,
+							 double origin_y, double progress) {
+	progress = MANGO_MAX(0.0, MANGO_MIN(progress, 1.0));
+	double ratio = config.zoom_initial_ratio +
+				   (1.0 - config.zoom_initial_ratio) * progress;
+	int32_t x0 = lround(origin_x + (final->x - origin_x) * ratio);
+	int32_t y0 = lround(origin_y + (final->y - origin_y) * ratio);
+	int32_t x1 =
+		lround(origin_x + (final->x + final->width - origin_x) * ratio);
+	int32_t y1 =
+		lround(origin_y + (final->y + final->height - origin_y) * ratio);
+	return (struct wlr_box){
+		.x = x0,
+		.y = y0,
+		.width = MANGO_MAX(x1 - x0, 1),
+		.height = MANGO_MAX(y1 - y0, 1),
+	};
+}
+
+double expand_content_opacity(double progress) {
+	if (progress <= 0.5)
+		return 0.0;
+	return MANGO_MIN((progress - 0.5) / 0.5, 1.0);
+}

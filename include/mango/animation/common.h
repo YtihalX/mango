@@ -90,4 +90,17 @@ void scene_snapshot_clip_to_box(struct wlr_scene_tree *snapshot,
 								const struct wlr_box *bounds, bool scale,
 								int32_t width, int32_t height);
 void request_fresh_all_monitors(void);
+
+/*
+ * Expanding glass: a surface grows out of an origin point (layout
+ * coordinates). At `progress` 0 its box is `final` scaled by
+ * zoom_initial_ratio about the origin, at 1 it is `final`. The box is
+ * computed in doubles and rounded once, edge by edge, so edges move by whole
+ * pixels without jitter between frames.
+ */
+struct wlr_box expand_box_at(const struct wlr_box *final, double origin_x,
+							 double origin_y, double progress);
+/* The opacity of an expanding surface's content at `progress`: none until
+ * the glass has passed half its growth, then rising to full. */
+double expand_content_opacity(double progress);
 #endif
