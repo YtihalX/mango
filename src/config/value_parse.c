@@ -179,6 +179,8 @@ int32_t animation_type_from_string(const char *value) {
 		return ANIM_TYPE_SLIDE;
 	if (strcmp(value, "zoom") == 0)
 		return ANIM_TYPE_ZOOM;
+	if (strcmp(value, "expand") == 0)
+		return ANIM_TYPE_EXPAND;
 	return ANIM_TYPE_UNKNOWN;
 }
 

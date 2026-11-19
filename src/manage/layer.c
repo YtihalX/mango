@@ -226,6 +226,7 @@ void handle_layer_surface_map(struct wl_listener *listener, void *data) {
 	l->animation_type_open = ANIM_TYPE_UNSET;
 	l->animation_type_close = ANIM_TYPE_UNSET;
 
+	l->animation.running = false;
 	// Applies the layer rule.
 	for (ji = 0; ji < config.layer_rules_count; ji++) {
 		if (regex_match(config.layer_rules[ji].layer_name,
@@ -362,6 +363,14 @@ void handle_layer_surface_commit(struct wl_listener *listener, void *data) {
 										   iter_layer_scene_buffers, l);
 		}
 	}
+
+	/* Buffer commits restore the scene-surface viewport. Reapply the
+	 * opening clip before that new content can reach the output. */
+	l->mapped = layer_surface->surface->mapped;
+	if (l->animation.running && l->animation.action == OPEN)
+		layer_animation_next_tick(l);
+	else
+		glass_lens_apply(layer_surface->surface);
 
 	layer_flush_blur_background(l);
 

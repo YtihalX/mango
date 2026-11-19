@@ -328,7 +328,8 @@ struct wlr_scene_blur *scene_snapshot_add_glass(
 	wlr_scene_node_set_position(&wrapper->node, x, y);
 	wlr_scene_node_lower_to_bottom(&wrapper->node);
 	wlr_scene_blur_set_glass(blur, true);
-	wlr_scene_blur_set_should_only_blur_bottom_layer(blur, false);
+	wlr_scene_blur_set_should_only_blur_bottom_layer(
+		blur, source->should_only_blur_bottom_layer);
 	wlr_scene_blur_set_corner_radii(blur, source->corners);
 	wlr_scene_blur_set_strength(blur, source->strength);
 	wlr_scene_blur_set_alpha(blur, source->alpha);

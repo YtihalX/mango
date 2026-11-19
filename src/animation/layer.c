@@ -2,6 +2,7 @@
 #include "mango/animation/common.h"
 #include "mango/common/server.h"
 #include "mango/common/util.h"
+#include "mango/ext-protocol/glass-lens.h"
 #include "mango/manage/client.h"
 #include "mango/manage/layer.h"
 #include "mango/manage/monitor.h"
@@ -19,6 +20,57 @@ static int32_t layer_close_animation_type(const LayerSurface *l) {
 	return l->animation_type_close != ANIM_TYPE_UNSET
 			   ? l->animation_type_close
 			   : config.layer_animation_type_close;
+}
+
+static void layer_expand_origin(LayerSurface *l) {
+	uint32_t anchor = l->layer_surface->current.anchor;
+	bool left = anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT;
+	bool right = anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT;
+	bool top = anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP;
+	bool bottom = anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM;
+	l->expand_origin_x = l->geom.x +
+						 (left != right ? (right ? l->geom.width : 0)
+										: l->geom.width / 2.0);
+	l->expand_origin_y = l->geom.y +
+						 (top != bottom ? (bottom ? l->geom.height : 0)
+										: l->geom.height / 2.0);
+}
+
+static int32_t layer_expand_radius(LayerSurface *l,
+								 const struct wlr_box *box) {
+	return MANGO_MIN(l->glass_radius, MANGO_MIN(box->width, box->height) / 2);
+}
+
+struct layer_expand_content {
+	double opacity;
+	int32_t radius;
+};
+
+static void layer_expand_content(struct wlr_scene_buffer *buffer, int32_t sx,
+								 int32_t sy, void *data) {
+	struct layer_expand_content *content = data;
+	wlr_scene_buffer_set_opacity(buffer, content->opacity);
+	wlr_scene_buffer_set_corner_radius(buffer, content->radius);
+}
+
+static void layer_expand_glass(LayerSurface *l, const struct wlr_box *box,
+							   double progress, bool snapshot) {
+	if (!l->blur || !config.blur ||
+		(!l->glass && (!config.blur_layer || l->no_blur)))
+		return;
+	if (snapshot) {
+		wlr_scene_node_set_position(&l->blur->node.parent->node, box->x,
+									box->y);
+		wlr_scene_node_set_position(&l->blur->node, 0, 0);
+	} else {
+		wlr_scene_node_set_position(&l->blur->node, box->x - l->geom.x,
+									box->y - l->geom.y);
+	}
+	wlr_scene_blur_set_size(l->blur, box->width, box->height);
+	wlr_scene_blur_set_corner_radius(l->blur, layer_expand_radius(l, box));
+	wlr_scene_blur_set_strength(l->blur, progress);
+	wlr_scene_blur_set_alpha(l->blur, progress);
+	wlr_scene_blur_set_glass_lens(l->blur, NULL, 0, NULL);
 }
 
 void layer_actual_size(LayerSurface *l, int32_t *width, int32_t *height) {
@@ -326,6 +378,25 @@ void fadeout_layer_animation_next_tick(LayerSurface *l) {
 
 	int32_t type = l->animation.action;
 	double factor = find_animation_curve_at(animation_passed, type);
+
+	if (layer_close_animation_type(l) == ANIM_TYPE_EXPAND) {
+		double progress = l->expand_progress * (1.0 - factor);
+		struct wlr_box box = expand_box_at(
+			&l->geom, l->expand_origin_x, l->expand_origin_y, progress);
+		struct wlr_box visible;
+		if (wlr_box_intersection(&visible, &box, &l->mon->m)) {
+			scene_snapshot_clip_to_box(l->scene, &visible, false, 0, 0);
+			struct layer_expand_content content = {
+				.opacity = expand_content_opacity(progress),
+				.radius = layer_expand_radius(l, &box),
+			};
+			wlr_scene_node_for_each_buffer(&l->scene->node,
+										   layer_expand_content, &content);
+		}
+		layer_expand_glass(l, &box, progress, true);
+		l->animation.current = box;
+		goto finish;
+	}
 	int32_t width = l->animation.initial.width +
 					(l->current.width - l->animation.initial.width) * factor;
 	int32_t height = l->animation.initial.height +
@@ -354,8 +425,7 @@ void fadeout_layer_animation_next_tick(LayerSurface *l) {
 	double opacity_eased_progress =
 		find_animation_curve_at(animation_passed, OPAFADEOUT);
 
-	double percent = config.fadeout_begin_opacity -
-					 (opacity_eased_progress * config.fadeout_begin_opacity);
+	double percent = l->close_opacity * (1.0 - opacity_eased_progress);
 
 	double opacity = MANGO_MAX(percent, 0.0f);
 
@@ -363,6 +433,13 @@ void fadeout_layer_animation_next_tick(LayerSurface *l) {
 		wlr_scene_node_for_each_buffer(&l->scene->node,
 									   scene_buffer_apply_opacity, &opacity);
 
+	if (l->blur) {
+		wlr_scene_blur_set_strength(l->blur,
+								   l->close_strength * (1.0 - factor));
+		wlr_scene_blur_set_alpha(l->blur, l->close_alpha * (1.0 - factor));
+	}
+
+finish:
 	if (animation_passed >= 1.0) {
 		wl_list_remove(&l->fadeout_link);
 		wlr_scene_node_destroy(&l->scene->node);
@@ -423,9 +500,41 @@ static bool layer_apply_output_clip(LayerSurface *l,
 	return true;
 }
 
+static void layer_expand_frame(LayerSurface *l, double progress) {
+	struct wlr_box box = expand_box_at(
+		&l->geom, l->expand_origin_x, l->expand_origin_y, progress);
+	wlr_scene_node_set_position(&l->scene->node, l->geom.x, l->geom.y);
+
+	struct wlr_scene_tree *surface_tree = layer_surface_tree(l);
+	struct wlr_box visible;
+	if (surface_tree && wlr_box_intersection(&visible, &box, &l->mon->m)) {
+		int32_t x, y;
+		wlr_scene_node_coords(&surface_tree->node, &x, &y);
+		struct wlr_box clip = {
+			.x = visible.x - x,
+			.y = visible.y - y,
+			.width = visible.width,
+			.height = visible.height,
+		};
+		wlr_scene_subsurface_tree_set_clip(&surface_tree->node, &clip);
+		struct layer_expand_content content = {
+			.opacity = expand_content_opacity(progress),
+			.radius = layer_expand_radius(l, &box),
+		};
+		wlr_scene_node_for_each_buffer(&surface_tree->node,
+									   layer_expand_content, &content);
+	}
+	layer_expand_glass(l, &box, progress, false);
+	l->expand_progress = progress;
+	l->animation.current = box;
+}
+
 void layer_animation_next_tick(LayerSurface *l) {
 	if (!l || !l->mapped)
 		return;
+
+	if (l->animation.action == OPEN && l->blur)
+		wlr_scene_blur_set_glass_lens(l->blur, NULL, 0, NULL);
 
 	struct timespec now;
 	clock_gettime(CLOCK_MONOTONIC, &now);
@@ -438,6 +547,12 @@ void layer_animation_next_tick(LayerSurface *l) {
 
 	int32_t type = l->animation.action == NONE ? MOVE : l->animation.action;
 	double factor = find_animation_curve_at(animation_passed, type);
+
+	if (l->animation.action == OPEN &&
+		layer_open_animation_type(l) == ANIM_TYPE_EXPAND) {
+		layer_expand_frame(l, factor);
+		goto finish;
+	}
 
 	int32_t width = l->animation.initial.width +
 					(l->current.width - l->animation.initial.width) * factor;
@@ -500,14 +615,18 @@ void layer_animation_next_tick(LayerSurface *l) {
 	};
 
 	if (config.blur && l->blur &&
-		(l->glass || (config.blur_layer && !l->no_blur)))
+		(l->glass || (config.blur_layer && !l->no_blur))) {
+		wlr_scene_node_set_position(&l->blur->node, 0, 0);
 		wlr_scene_blur_set_size(l->blur, l->animation.current.width,
 								l->animation.current.height);
+	}
 
+finish:
 	if (animation_passed >= 1.0) {
 		l->animation.running = false;
 		l->need_output_flush = false;
 		l->animation.action = MOVE;
+		glass_lens_apply(l->layer_surface->surface);
 	}
 }
 void init_fadeout_layers(LayerSurface *l) {
@@ -545,6 +664,26 @@ void init_fadeout_layers(LayerSurface *l) {
 		return;
 	}
 
+	if (config.blur && l->glass && l->blur) {
+		fadeout_layer->blur =
+			scene_snapshot_add_glass(fadeout_layer->scene, l->blur);
+		fadeout_layer->close_strength = l->blur->strength;
+		fadeout_layer->close_alpha = l->blur->alpha;
+	}
+	fadeout_layer->close_opacity = config.fadeout_begin_opacity;
+	fadeout_layer->glass = l->glass;
+	fadeout_layer->glass_radius = l->glass_radius;
+	layer_expand_origin(l);
+	fadeout_layer->expand_origin_x = l->expand_origin_x;
+	fadeout_layer->expand_origin_y = l->expand_origin_y;
+	bool opening_expand = l->animation.running &&
+						  l->animation.action == OPEN &&
+						  layer_open_animation_type(l) == ANIM_TYPE_EXPAND;
+	fadeout_layer->expand_progress = opening_expand ? l->expand_progress : 1.0;
+	if (opening_expand)
+		fadeout_layer->close_opacity =
+			expand_content_opacity(l->expand_progress);
+
 	fadeout_layer->animation.duration = config.animation_duration_close;
 	fadeout_layer->geom = fadeout_layer->current =
 		fadeout_layer->animainit_geom = fadeout_layer->animation.initial =
@@ -553,6 +692,13 @@ void init_fadeout_layers(LayerSurface *l) {
 	fadeout_layer->animation.action = CLOSE;
 	fadeout_layer->animation_type_close = l->animation_type_close;
 	fadeout_layer->animation_type_open = l->animation_type_open;
+
+	if (layer_close_animation_type(l) == ANIM_TYPE_EXPAND) {
+		fadeout_layer->geom = l->geom;
+		/* Snapshot buffers keep their layout positions: only their clip
+		 * shrinks, so even an interrupted open never scales the text. */
+		goto start;
+	}
 
 	// Here the coordinate setting for snap nodes uses relative coordinates;
 	// absolute coordinates cannot be used This differs from ordinary nodes
@@ -596,6 +742,7 @@ void init_fadeout_layers(LayerSurface *l) {
 		fadeout_layer->current.height = 0;
 	}
 
+start:
 	// animation start time
 	fadeout_layer->animation.time_started = get_now_in_ms();
 
@@ -622,6 +769,11 @@ void layer_set_pending_state(LayerSurface *l) {
 
 		if (l->animation.duration == 0) {
 			l->animainit_geom = l->geom;
+		} else if (layer_open_animation_type(l) == ANIM_TYPE_EXPAND) {
+			layer_expand_origin(l);
+			l->expand_progress = 0.0;
+			l->animainit_geom = expand_box_at(
+				&l->geom, l->expand_origin_x, l->expand_origin_y, 0.0);
 		} else if (layer_open_animation_type(l) == ANIM_TYPE_ZOOM) {
 			l->animainit_geom.width = l->geom.width * config.zoom_initial_ratio;
 			l->animainit_geom.height =

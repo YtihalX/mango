@@ -30,6 +30,10 @@ typedef struct LayerSurface {
 	struct wl_listener surface_commit;
 
 	struct mango_animation animation;
+	/* Keep the opening phase when an unmap interrupts the growing slab. */
+	double expand_origin_x, expand_origin_y;
+	double expand_progress;
+	double close_opacity, close_strength, close_alpha;
 	bool dirty;
 	int32_t no_blur;
 	int32_t no_animation;

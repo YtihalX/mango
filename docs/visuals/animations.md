@@ -25,6 +25,33 @@ layer_animation_type_open=slide
 layer_animation_type_close=slide
 ```
 
+### Expanding layer glass
+
+Layers also accept `expand`, without changing the default animation types:
+
+```ini
+layer_rule=animation_type_open:expand,animation_type_close:expand,layer_name:^(my-panel|my-notifications)$
+```
+
+`layer_animation_type_open=expand` and `layer_animation_type_close=expand`
+select it globally for layers. An individual layer rule can override either.
+Window animations do not support `expand`.
+
+The layer's anchors choose its origin: one anchored edge gives its midpoint,
+two adjacent edges their corner, and opposing or no edges the centre on that
+axis. Glass grows from `zoom_initial_ratio` to its final size using the normal
+open duration and curve. Its strength and alpha grow from zero; its radius is
+clamped to half the current shorter side. Content stays at its real size,
+clipped to the rounded slab, and fades in only after halfway. This staged fade
+is intrinsic to `expand`, independent of the optional fades above.
+
+Closing reverses the growth on a snapshot, preserving its glass until the
+last frame. Interrupting an open closes from the current size and opacity.
+Every other layer close type also retains the layer's glass. Mapped geometry
+changes still use the move animation. A protocol lens is hidden during open
+and close and restored when the open settles, including a lens sent on the
+mapping commit. Animated edges are rounded once in layout coordinates.
+
 ## Fade Settings
 
 Control the fade-in and fade-out effects for animations.
