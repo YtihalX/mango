@@ -1570,6 +1570,7 @@ void apply_rule_properties(Client *c, const ConfigWinRule *r) {
 	APPLY_INT_PROP(c, r, glass_radius);
 	APPLY_INT_PROP(c, r, popup_glass);
 	APPLY_INT_PROP(c, r, popup_glass_radius);
+	APPLY_INT_PROP(c, r, popup_glass_ungrabbed);
 	APPLY_INT_PROP(c, r, allow_shortcuts_inhibit);
 
 	APPLY_FLOAT_PROP(c, r, scroller_proportion);
@@ -2150,6 +2151,7 @@ void init_client_properties(Client *c) {
 	c->glass_radius = -1;
 	c->popup_glass = 0;
 	c->popup_glass_radius = -1;
+	c->popup_glass_ungrabbed = 0;
 	c->tearing_hint = 0;
 	c->overview_isfullscreenbak = 0;
 	c->overview_ismaximizescreenbak = 0;

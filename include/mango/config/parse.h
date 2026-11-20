@@ -159,6 +159,7 @@ typedef struct {
 	int32_t glass_radius;
 	int32_t popup_glass;
 	int32_t popup_glass_radius;
+	int32_t popup_glass_ungrabbed;
 	float focused_opacity;
 	float unfocused_opacity;
 	float scroller_proportion_single;

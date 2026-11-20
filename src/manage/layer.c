@@ -491,19 +491,23 @@ void layer_apply_popup_glass_rules(LayerSurface *l) {
 }
 
 /* Whether the rule of the window or layer surface at the root of a popup's
- * parent chain gives its popups glass, and with which corner radius. */
-static bool popup_glass_rule(struct wlr_xdg_popup *wlr_popup, int32_t *radius) {
+ * parent chain gives its popups glass, with which corner radius, and whether
+ * to popups that take no grab too. */
+static bool popup_glass_rule(struct wlr_xdg_popup *wlr_popup, int32_t *radius,
+							 bool *ungrabbed) {
 	Client *c = NULL;
 	LayerSurface *l = NULL;
 	int32_t type = toplevel_from_wlr_surface(wlr_popup->base->surface, &c, &l);
 	int32_t glass = 0;
 	*radius = -1;
+	*ungrabbed = false;
 	if (type == LayerShell && l) {
 		glass = l->popup_glass;
 		*radius = l->popup_glass_radius;
 	} else if (type != LayerShell && type >= 0 && c) {
 		glass = c->popup_glass;
 		*radius = c->popup_glass_radius;
+		*ungrabbed = c->popup_glass_ungrabbed;
 	}
 	if (*radius < 0)
 		*radius = 12;
@@ -525,10 +529,13 @@ bool surface_is_translucent_at(struct wlr_surface *surface, int32_t x,
 										   NULL);
 }
 
-/* Menus and popovers take a grab, tooltips don't. */
-static bool popup_is_translucent_menu(struct wlr_xdg_popup *wlr_popup) {
+/* Menus and popovers take a grab, tooltips don't; but Gecko apps (Firefox,
+ * Zotero) take none for their menus, and draw tooltips without popups: their
+ * rule says to give glass to `ungrabbed` popups too. */
+static bool popup_is_translucent_menu(struct wlr_xdg_popup *wlr_popup,
+									  bool ungrabbed) {
 	const struct wlr_box *geometry = &wlr_popup->base->geometry;
-	if (!wlr_popup->seat || wlr_box_empty(geometry))
+	if ((!wlr_popup->seat && !ungrabbed) || wlr_box_empty(geometry))
 		return false;
 	return surface_is_translucent_at(wlr_popup->base->surface,
 									 geometry->x + geometry->width / 2,
@@ -553,8 +560,9 @@ static void popup_update_glass(Popup *popup) {
 	struct wlr_scene_tree *tree =
 		wlr_popup ? wlr_popup->base->surface->data : NULL;
 	int32_t radius;
-	if (!tree || !popup_glass_rule(wlr_popup, &radius) ||
-		!popup_is_translucent_menu(wlr_popup)) {
+	bool ungrabbed;
+	if (!tree || !popup_glass_rule(wlr_popup, &radius, &ungrabbed) ||
+		!popup_is_translucent_menu(wlr_popup, ungrabbed)) {
 		if (popup->glass)
 			wlr_scene_node_set_enabled(&popup->glass->node, false);
 		return;

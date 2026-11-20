@@ -201,6 +201,7 @@ struct Client {
 	int32_t glass_radius;
 	int32_t popup_glass;
 	int32_t popup_glass_radius;
+	int32_t popup_glass_ungrabbed;
 	float blur_opacity;
 	struct wlr_ext_foreign_toplevel_handle_v1 *ext_foreign_toplevel;
 	double master_mfact_per, master_inner_per, stack_inner_per;

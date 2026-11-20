@@ -126,6 +126,7 @@ void reapply_property(void) {
 			c->glass_radius = -1;
 			c->popup_glass = 0;
 			c->popup_glass_radius = -1;
+			c->popup_glass_ungrabbed = 0;
 			const char *appid = client_get_appid(c);
 			const char *title = client_get_title(c);
 			for (int32_t i = 0; i < config.window_rules_count; i++) {
@@ -138,6 +139,7 @@ void reapply_property(void) {
 				APPLY_INT_PROP(c, r, glass_radius);
 				APPLY_INT_PROP(c, r, popup_glass);
 				APPLY_INT_PROP(c, r, popup_glass_radius);
+				APPLY_INT_PROP(c, r, popup_glass_ungrabbed);
 			}
 			client_sync_blur_optimized(c);
 			if (c->glass) {

@@ -67,6 +67,7 @@ window_rule_once=Parameter:Values,Parameter:Values,app_id:Values,title:Values
 | `glass_radius` | integer | `0` and up | Corner radius for a glass window; defaults to `border_radius`. |
 | `popup_glass` | integer | `0` / `1` | Glass under the window's menus, nested ones included, shaped by each menu's window geometry. Only menus that take a grab and leave the middle of their geometry translucent get it: solid menus and tooltips stay as they are. Requires `blur=1`. |
 | `popup_glass_radius` | integer | `0` and up | Corner radius for popup glass; defaults to `12`. |
+| `popup_glass_ungrabbed` | integer | `0` / `1` | With `popup_glass`, glass under the window's popups that take no grab too, as Gecko apps' menus (Firefox, Zotero) do. Every such popup that leaves its middle translucent gets glass, shaped by its window geometry, so the app's popups must leave no translucent shadow margin; a solid popup hides it. |
 | `no_border` | integer | `0` / `1` | Remove window border |
 | `no_shadow` | integer | `0` / `1` | Not apply shadow |
 | `no_radius` | integer | `0` / `1` | Not apply corner radius |
