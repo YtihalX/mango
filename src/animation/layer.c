@@ -156,61 +156,38 @@ void get_layer_target_geometry(LayerSurface *l, struct wlr_box *target_box) {
 	// exclusive_zone
 	struct wlr_box bounds = layer_bound_area(l);
 
-	// Initialize geometry position
+	/* Where wlr_scene_layer_surface_v1_configure places it, to the pixel:
+	 * an animation that ends elsewhere jumps. Centred surfaces round as
+	 * wlroots does, and take no margins. */
 	struct wlr_box box = {.width = state->desired_width,
 						  .height = state->desired_height};
 
-	// horizontal positioning
-	const int32_t both_horiz =
-		ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT | ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT;
 	if (box.width == 0) {
-		box.x = bounds.x;
-	} else if ((state->anchor & both_horiz) == both_horiz) {
-		box.x = bounds.x + ((bounds.width - box.width) / 2);
-	} else if (state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT) {
-		box.x = bounds.x;
-	} else if (state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT) {
-		box.x = bounds.x + (bounds.width - box.width);
-	} else {
-		box.x = bounds.x + ((bounds.width - box.width) / 2);
-	}
-
-	// vertical positioning
-	const int32_t both_vert =
-		ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM;
-	if (box.height == 0) {
-		box.y = bounds.y;
-	} else if ((state->anchor & both_vert) == both_vert) {
-		box.y = bounds.y + ((bounds.height - box.height) / 2);
-	} else if (state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP) {
-		box.y = bounds.y;
-	} else if (state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM) {
-		box.y = bounds.y + (bounds.height - box.height);
-	} else {
-		box.y = bounds.y + ((bounds.height - box.height) / 2);
-	}
-
-	// apply margins
-	if (box.width == 0) {
-		box.x += state->margin.left;
+		box.x = bounds.x + state->margin.left;
 		box.width = bounds.width - (state->margin.left + state->margin.right);
+	} else if (state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT &&
+			   state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT) {
+		box.x = bounds.x + bounds.width / 2 - box.width / 2;
+	} else if (state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT) {
+		box.x = bounds.x + state->margin.left;
+	} else if (state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT) {
+		box.x = bounds.x + bounds.width - box.width - state->margin.right;
 	} else {
-		if (state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT) {
-			box.x += state->margin.left;
-		} else if (state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT) {
-			box.x -= state->margin.right;
-		}
+		box.x = bounds.x + bounds.width / 2 - box.width / 2;
 	}
 
 	if (box.height == 0) {
-		box.y += state->margin.top;
+		box.y = bounds.y + state->margin.top;
 		box.height = bounds.height - (state->margin.top + state->margin.bottom);
+	} else if (state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP &&
+			   state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM) {
+		box.y = bounds.y + bounds.height / 2 - box.height / 2;
+	} else if (state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP) {
+		box.y = bounds.y + state->margin.top;
+	} else if (state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM) {
+		box.y = bounds.y + bounds.height - box.height - state->margin.bottom;
 	} else {
-		if (state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP) {
-			box.y += state->margin.top;
-		} else if (state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM) {
-			box.y -= state->margin.bottom;
-		}
+		box.y = bounds.y + bounds.height / 2 - box.height / 2;
 	}
 
 	target_box->x = box.x;
