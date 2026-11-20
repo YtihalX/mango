@@ -35,6 +35,12 @@ otherwise plain blur on tiled windows and the bottom layer). Brightness,
 contrast, saturation and noise are applied in the blur's last pass, not in a
 pass of their own.
 
+To see what glass costs, start mango with `MANGO_DEBUG_GLASS=1`: it writes a
+line to stderr for each frame's damage and the part of it blur added, and for
+each glass draw, the region the draw presents and the region its blur works
+over, each as `glass WHAT AREA X1,Y1,X2,Y2;...` in buffer pixels. minshell's
+`dev/check-chrome-glass.sh` reads these to keep glass off work content.
+
 ---
 
 ## Shadows
