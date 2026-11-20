@@ -3,6 +3,7 @@
 #include "mango/common/log.h"
 #include "mango/common/server.h"
 #include "mango/common/util.h"
+#include "mango/dispatch/bind.h"
 #include "mango/input/pointer.h"
 #include "mango/ipc/ipc.h"
 #include "mango/manage/client.h"
@@ -313,6 +314,8 @@ void handle_tablet_tool_proximity(struct wl_listener *listener, void *data) {
 	struct wlr_tablet_tool *wlr_tool = event->tool;
 	struct TabletTool *tool = wlr_tool->data;
 
+	power_on_monitors(NULL);
+
 	if (!tool) {
 		tool = calloc(1, sizeof(struct TabletTool));
 		if (!tool) {
@@ -361,6 +364,7 @@ void handle_tablet_tool_axis(struct wl_listener *listener, void *data) {
 	struct TabletTool *tool = event->tool->data;
 	if (!tool)
 		return;
+	power_on_monitors(NULL);
 
 	tablet_tool_motion(tool, event->updated_axes & WLR_TABLET_TOOL_AXIS_X,
 					   event->updated_axes & WLR_TABLET_TOOL_AXIS_Y, event->x,
@@ -396,6 +400,7 @@ void handle_tablet_tool_button(struct wl_listener *listener, void *data) {
 	struct TabletTool *tool = event->tool->data;
 	if (!tool)
 		return;
+	power_on_monitors(NULL);
 	wlr_tablet_v2_tablet_tool_notify_button(
 		tool->tool_v2, event->button,
 		(enum zwp_tablet_pad_v2_button_state)event->state);

@@ -242,6 +242,7 @@ void cleanup_listeners(void) {
 
 void cleanup(void) {
 	server.allow_frame_scheduling = false;
+	animation_clock_finish();
 
 	unset_activation_env();
 
@@ -699,6 +700,7 @@ void setup(void) {
 	wl_list_init(&server.focus_stack);
 	wl_list_init(&server.fadeout_clients);
 	wl_list_init(&server.fadeout_layers);
+	animation_clock_init();
 
 	server.idle_notifier = wlr_idle_notifier_v1_create(server.display);
 

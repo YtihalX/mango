@@ -1383,12 +1383,9 @@ void monitor_check_skip_frame_timeout(Monitor *m) {
 
 void handle_output_frame(struct wl_listener *listener, void *data) {
 	Monitor *m = wl_container_of(listener, m, frame);
-	Client *c = NULL, *tmp = NULL;
-	LayerSurface *l = NULL, *tmpl = NULL;
-	int32_t i;
-	struct wl_list *layer_list;
+	Client *c;
 	struct timespec now;
-	bool need_more_frames = false;
+	bool force_render = false;
 	bool resizing_on_this_mon = false;
 
 	if (server.session && !server.session->active) {
@@ -1400,31 +1397,16 @@ void handle_output_frame(struct wl_listener *listener, void *data) {
 
 	m->frame_serial++;
 
-	// Draws layers and fade-out effects.
-	for (i = 0; i < LENGTH(m->layers); i++) {
-		layer_list = &m->layers[i];
-		wl_list_for_each_safe(l, tmpl, layer_list, link) {
-			need_more_frames = layer_draw_frame(l) || need_more_frames;
-		}
-	}
-
-	wl_list_for_each_safe(c, tmp, &server.fadeout_clients, fadeout_link) {
-		need_more_frames = client_draw_fadeout_frame(c) || need_more_frames;
-	}
-
-	wl_list_for_each_safe(l, tmpl, &server.fadeout_layers, fadeout_link) {
-		need_more_frames = layer_draw_fadeout_frame(l) || need_more_frames;
-	}
-
 	wl_list_for_each(c, &server.clients, link) {
-		need_more_frames = client_draw_frame(c) || need_more_frames;
+		if (c->force_render && c->mon == m && !c->scene->node.enabled)
+			force_render = client_force_render(c) || force_render;
 
 		if (!c->force_render && c->configure_serial &&
 			client_is_rendered_on_mon(c, m))
 			resizing_on_this_mon = true;
 	}
 
-	if (!config.animations && !server.grab_client && !need_more_frames &&
+	if (!config.animations && !server.grab_client && !force_render &&
 		resizing_on_this_mon) {
 		monitor_check_skip_frame_timeout(m);
 		goto skip;
@@ -1441,10 +1423,10 @@ skip:
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	wlr_scene_output_send_frame_done(m->scene_output, &now);
 
-	// If more frames are needed, ensure the next frame is scheduled.
-	if (need_more_frames && server.allow_frame_scheduling) {
-		request_fresh_all_monitors();
-	}
+	/* Hidden force-render clients still receive callbacks at their output's
+	 * cadence; animations themselves are driven only by the shared clock. */
+	if (force_render && server.allow_frame_scheduling)
+		wlr_output_schedule_frame(m->wlr_output);
 }
 
 void check_vrr_enable(Client *c) {

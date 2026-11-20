@@ -1086,7 +1086,7 @@ static void client_set_surface_clip(Client *c, const struct wlr_box *clip) {
 }
 
 void client_set_clip(Client *c, float factor) {
-	if (c->iskilling || !client_surface(c)->mapped)
+	if (c->iskilling || !c->mon || !client_surface(c)->mapped)
 		return;
 
 	/*
@@ -1503,7 +1503,7 @@ void init_fadeout_client(Client *c) {
 	wlr_scene_node_set_enabled(&fadeout_client->scene->node, true);
 	wl_list_insert(&server.fadeout_clients, &fadeout_client->fadeout_link);
 
-	request_fresh_all_monitors();
+	animation_schedule_tick();
 }
 void client_set_finish_geometry(Client *c) {
 	if (!c || !c->scene)
@@ -1572,7 +1572,7 @@ void client_animation_resume(Client *c, double remaining) {
 	c->animation.time_started = get_now_in_ms();
 	c->animation.running = true;
 	c->need_output_flush = true;
-	request_fresh_all_monitors();
+	animation_schedule_client(c);
 }
 void client_commit(Client *c) {
 	c->current = c->pending;
@@ -1597,7 +1597,9 @@ void client_commit(Client *c) {
 	if (!client_animations_enabled(c))
 		client_set_finish_geometry(c);
 
-	request_fresh_all_monitors();
+	animation_schedule_client(c);
+	if (c->force_render && c->mon && !c->scene->node.enabled)
+		wlr_output_schedule_frame(c->mon->wlr_output);
 }
 void client_set_pending_state(Client *c) {
 	if (!c || c->iskilling)
@@ -1818,6 +1820,7 @@ void client_start_focus_animation(Client *c, bool focused) {
 		   sizeof(c->opacity_animation.initial_dim_color));
 	c->opacity_animation.time_started = get_now_in_ms();
 	c->opacity_animation.running = true;
+	animation_schedule_client(c);
 }
 
 static void client_interpolate_focus_animation(Client *c,
@@ -1859,6 +1862,7 @@ void client_set_unfocused_opacity_animation(Client *c) {
 	wlr_scene_node_raise_to_top(&c->border->node);
 	if (!config.animations) {
 		client_update_border_color(c);
+		animation_schedule_client(c);
 		return;
 	}
 
@@ -1869,6 +1873,7 @@ void client_set_focused_opacity_animation(Client *c) {
 
 	if (!config.animations) {
 		client_update_border_color(c);
+		animation_schedule_client(c);
 		return;
 	}
 
@@ -2009,28 +2014,23 @@ bool client_set_focus_opacity(Client *c) {
 
 bool client_draw_frame(Client *c) {
 	bool need_next_tick = false;
-	bool force_render = false;
 
 	if (!c || !client_surface(c)->mapped)
 		return false;
 
-	// always render when scene is disabled
-	if (c->force_render && !c->scene->node.enabled) {
-		force_render = client_force_render(c);
-		need_next_tick = force_render || need_next_tick;
-	}
-
 	if (server.gesture_drive_active && c->mon == server.gesture_drive_mon &&
 		c->animation.running && c->need_output_flush) {
+		/* The gesture owns geometry until resume; do not keep a clock alive
+		 * solely for its running flag. */
 		return client_set_focus_opacity(c);
 	}
 
 	if (!c->need_output_flush)
-		return client_set_focus_opacity(c) || need_next_tick;
+		return client_set_focus_opacity(c);
 
 	if (config.animations && c->animation.running) {
-		need_next_tick = true;
 		client_animation_next_tick(c);
+		need_next_tick = c->animation.running;
 	} else {
 		client_set_finish_geometry(c);
 	}

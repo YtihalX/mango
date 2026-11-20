@@ -843,6 +843,10 @@ FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
 	} else if (strcmp(func_name, "sleep_toggle_monitor") == 0) {
 		func = sleep_toggle_monitor;
 		(*arg).v = strdup(arg_value);
+	} else if (strcmp(func_name, "power_off_monitors") == 0) {
+		func = power_off_monitors;
+	} else if (strcmp(func_name, "power_on_monitors") == 0) {
+		func = power_on_monitors;
 	} else if (strcmp(func_name, "scroller_stack") == 0) {
 		func = scroller_stack;
 		(*arg).i = parse_direction(arg_value);

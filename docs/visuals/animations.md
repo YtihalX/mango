@@ -12,6 +12,10 @@ animations=1
 layer_animations=1
 ```
 
+Windows and layers advance on one animation clock. Each output still presents
+independently and only receives animation damage where the old or new scene
+content touches it, including when a window moves between outputs.
+
 ## Animation Types
 
 You can define different animation styles for opening and closing windows and layer surfaces.
@@ -51,6 +55,8 @@ Every other layer close type also retains the layer's glass. Mapped geometry
 changes still use the move animation. A protocol lens is hidden during open
 and close and restored when the open settles, including a lens sent on the
 mapping commit. Animated edges are rounded once in layout coordinates.
+While opening, the animation controls the glass box; new layer buffers are
+clipped to the current box without resizing the glass.
 
 ## Fade Settings
 

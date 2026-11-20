@@ -2522,6 +2522,7 @@ void handle_client_unmap(struct wl_listener *listener, void *data) {
 	Monitor *m = NULL;
 	Client *nextfocus = NULL;
 	c->iskilling = 1;
+	animation_cancel_client(c);
 	switcher_remove_client(c);
 	struct ScrollerStackNode *target_node =
 		c->mon ? find_scroller_node(
@@ -2688,6 +2689,7 @@ void handle_client_unmap(struct wl_listener *listener, void *data) {
 void handle_client_destroy(struct wl_listener *listener, void *data) {
 	/* Called when the xdg_toplevel is destroyed. */
 	Client *c = wl_container_of(listener, c, destroy);
+	animation_cancel_client(c);
 	wl_list_remove(&c->destroy.link);
 	wl_list_remove(&c->set_title.link);
 	wl_list_remove(&c->fullscreen.link);
@@ -2877,8 +2879,7 @@ void client_sync_blur_optimized(Client *c) {
 	bool glass = client_uses_glass(c);
 	if (c->blur->glass != glass) {
 		c->need_output_flush = true;
-		if (c->mon)
-			wlr_output_schedule_frame(c->mon->wlr_output);
+		animation_schedule_client(c);
 	}
 	wlr_scene_blur_set_glass(c->blur, glass);
 	wlr_scene_blur_set_should_only_blur_bottom_layer(c->blur,
@@ -4663,8 +4664,10 @@ void client_chain_unlink(Client *c, size_t prev_off, size_t next_off) {
 }
 
 static void client_group_mark_dirty(Client *c) {
-	for (Client *it = client_group_head(c); it; it = it->group_next)
+	for (Client *it = client_group_head(c); it; it = it->group_next) {
 		it->need_output_flush = true;
+		animation_schedule_client(it);
+	}
 }
 
 void client_group_detach(Client *c) {

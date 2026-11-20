@@ -2584,6 +2584,41 @@ int32_t sleep_toggle_monitor(const Arg *arg) {
 	return 0;
 }
 
+int32_t power_off_monitors(const Arg *arg) {
+	Monitor *m = NULL;
+	wl_list_for_each(m, &server.monitors, link) {
+		if (!m->wlr_output->enabled)
+			continue;
+		wlr_output_state_set_enabled(&m->pending, false);
+		mango_output_commit(m);
+		m->only_sleep = 1;
+		m->powered_off = true;
+		server.monitors_powered_off = true;
+	}
+	handle_output_layout_change(NULL, NULL);
+	return 0;
+}
+
+int32_t power_on_monitors(const Arg *arg) {
+	if (!server.monitors_powered_off)
+		return 0;
+	server.monitors_powered_off = false;
+	Monitor *m = NULL;
+	wl_list_for_each(m, &server.monitors, link) {
+		if (!m->powered_off)
+			continue;
+		m->powered_off = false;
+		/* Woken or removed meanwhile: leave it as it is. */
+		if (m->wlr_output->enabled || !m->only_sleep)
+			continue;
+		wlr_output_state_set_enabled(&m->pending, true);
+		mango_output_commit(m);
+		m->only_sleep = 0;
+	}
+	handle_output_layout_change(NULL, NULL);
+	return 0;
+}
+
 void scroller_apply_stack(Client *c, Client *target_client, int32_t direction) {
 	if (!c || !c->mon || c->isfloating || !is_scroller_layout(c->mon))
 		return;

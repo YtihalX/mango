@@ -69,6 +69,7 @@ struct Monitor {
 	int32_t ov_tab_layout;	/* Uses the centered tab layout when entering via
 							   overcircle. */
 	int32_t only_sleep;
+	bool powered_off; /* by power_off_monitors: input activity wakes it */
 	bool special_empty_view; // user intentionally opened the empty special view
 	uint32_t visible_clients;
 	uint32_t visible_tiling_clients;

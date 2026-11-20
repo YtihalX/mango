@@ -3,6 +3,7 @@
 #include "mango/common/log.h"
 #include "mango/common/server.h"
 #include "mango/common/util.h"
+#include "mango/dispatch/bind.h"
 #include "mango/input/pointer.h"
 #include "mango/ipc/ipc.h"
 #include "mango/manage/client.h"
@@ -164,6 +165,7 @@ void handle_cursor_touch_down(struct wl_listener *listener, void *data) {
 	touch_apply_monitor_mapping(event->touch);
 
 	wlr_idle_notifier_v1_notify_activity(server.idle_notifier, server.seat);
+	power_on_monitors(NULL);
 
 	point->surface = touch_get_coords(event->touch, event->x, event->y,
 									  &x_offset, &y_offset, &c);
@@ -233,6 +235,7 @@ void handle_cursor_touch_motion(struct wl_listener *listener, void *data) {
 	}
 
 	wlr_idle_notifier_v1_notify_activity(server.idle_notifier, server.seat);
+	power_on_monitors(NULL);
 
 	wl_list_for_each(point, &server.touch_points, link) {
 		if (point->touch_id != event->touch_id)

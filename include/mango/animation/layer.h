@@ -15,6 +15,8 @@ void layer_scene_buffer_apply_effect(struct wlr_scene_buffer *buffer,
 									 int32_t sx, int32_t sy, void *data);
 void fadeout_layer_animation_next_tick(LayerSurface *l);
 void layer_animation_next_tick(LayerSurface *l);
+/* Restore committed content at the last tick, without advancing geometry. */
+void layer_reapply_content(LayerSurface *l);
 
 void init_fadeout_layers(LayerSurface *l);
 void layer_set_pending_state(LayerSurface *l);

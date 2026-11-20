@@ -124,6 +124,12 @@ int32_t toggle_monitor(const Arg *arg);
 int32_t sleep_monitor(const Arg *arg);
 int32_t wakeup_monitor(const Arg *arg);
 int32_t sleep_toggle_monitor(const Arg *arg);
+/* niri's power-off-monitors: every lit monitor off, kept in the layout, until
+ * power_on_monitors, which input activity calls (a key or button press, pointer
+ * motion, scrolling, a gesture's start, a touch, a tablet pen). Cheap when
+ * nothing is off; the argument is unused. */
+int32_t power_off_monitors(const Arg *arg);
+int32_t power_on_monitors(const Arg *arg);
 int32_t scroller_stack(const Arg *arg);
 int32_t toggle_all_floating(const Arg *arg);
 int32_t dwindle_toggle_split_direction(const Arg *arg);

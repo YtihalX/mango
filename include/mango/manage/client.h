@@ -176,6 +176,7 @@ struct Client {
 	bool need_output_flush;
 	struct mango_animation animation;
 	struct mango_opacity_animation opacity_animation;
+	struct wl_list animation_link;
 	int32_t isterm, no_swallow;
 	int32_t allow_csd;
 	int32_t force_fakemaximize;

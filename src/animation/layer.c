@@ -52,21 +52,17 @@ static void layer_expand_content(struct wlr_scene_buffer *buffer, int32_t sx,
 }
 
 static void layer_expand_glass(LayerSurface *l, const struct wlr_box *box,
-							   double progress, bool snapshot) {
+							   double progress) {
 	if (!l->blur || !config.blur ||
 		(!l->glass && (!config.blur_layer || l->no_blur)))
 		return;
-	if (snapshot) {
-		wlr_scene_node_set_position(&l->blur->node.parent->node, box->x,
-									box->y);
-		wlr_scene_node_set_position(&l->blur->node, 0, 0);
-	} else {
-		int32_t x, y;
-		wlr_scene_node_coords(&l->scene->node, &x, &y);
-		wlr_scene_node_set_position(&l->blur->node, box->x - x, box->y - y);
-	}
-	wlr_scene_blur_set_size(l->blur, box->width, box->height);
-	wlr_scene_blur_set_corner_radius(l->blur, layer_expand_radius(l, box));
+	/* One scene update for the box; strength and alpha only redraw. The
+	 * parent is the layer's tree, or a close snapshot's glass wrapper. */
+	int32_t x, y;
+	wlr_scene_node_coords(&l->blur->node.parent->node, &x, &y);
+	wlr_scene_blur_set_geometry(l->blur, box->x - x, box->y - y, box->width,
+								box->height,
+								corner_radii_all(layer_expand_radius(l, box)));
 	wlr_scene_blur_set_strength(l->blur, progress);
 	wlr_scene_blur_set_alpha(l->blur, progress);
 	wlr_scene_blur_set_glass_lens(l->blur, NULL, 0, NULL);
@@ -397,7 +393,7 @@ void fadeout_layer_animation_next_tick(LayerSurface *l) {
 			wlr_scene_node_for_each_buffer(&l->scene->node,
 										   layer_expand_content, &content);
 		}
-		layer_expand_glass(l, &box, progress, true);
+		layer_expand_glass(l, &box, progress);
 		l->animation.current = box;
 		goto finish;
 	}
@@ -504,36 +500,70 @@ static bool layer_apply_output_clip(LayerSurface *l,
 	return true;
 }
 
+void layer_reapply_content(LayerSurface *l) {
+	if (!l || !l->layer_surface->surface->mapped)
+		return;
+	const struct wlr_box *box = &l->animation.current;
+	if (l->expand_opening) {
+		struct wlr_scene_tree *surface_tree = layer_surface_tree(l);
+		if (!surface_tree || !l->mon)
+			return;
+		struct wlr_box visible;
+		bool visible_content = wlr_box_intersection(&visible, box, &l->mon->m);
+		wlr_scene_node_set_enabled(&surface_tree->node, visible_content);
+		if (visible_content) {
+			int32_t x, y;
+			wlr_scene_node_coords(&surface_tree->node, &x, &y);
+			struct wlr_box clip = {
+				.x = visible.x - x,
+				.y = visible.y - y,
+				.width = visible.width,
+				.height = visible.height,
+			};
+			wlr_scene_subsurface_tree_set_clip(&surface_tree->node, &clip);
+		}
+		struct layer_expand_content content = {
+			.opacity = expand_content_opacity(l->expand_progress),
+			.radius = layer_expand_radius(l, box),
+		};
+		wlr_scene_node_for_each_buffer(&surface_tree->node,
+									   layer_expand_content, &content);
+		return;
+	}
+
+	bool clipped = layer_apply_output_clip(l, box);
+	if (layer_open_animation_type(l) == ANIM_TYPE_ZOOM && !clipped) {
+		BufferData buffer_data = {
+			.width_scale = l->current.width
+							   ? (float)box->width / l->current.width : 1.0f,
+			.height_scale = l->current.height
+								? (float)box->height / l->current.height : 1.0f,
+		};
+		wlr_scene_node_for_each_buffer(
+			&l->scene->node, layer_scene_buffer_apply_effect, &buffer_data);
+	}
+	if (config.animation_fade_in) {
+		double opacity = MANGO_MIN(
+			config.fadein_begin_opacity +
+				find_animation_curve_at(l->animation_progress, OPAFADEIN) *
+					(1.0 - config.fadein_begin_opacity),
+			1.0);
+		wlr_scene_node_for_each_buffer(&l->scene->node,
+									   scene_buffer_apply_opacity, &opacity);
+	}
+}
+
 static void layer_expand_frame(LayerSurface *l, const struct wlr_box *geometry,
 							   double progress) {
 	layer_expand_origin(l, geometry);
 	struct wlr_box box = expand_box_at(geometry, l->expand_origin_x,
 									   l->expand_origin_y, progress);
 	wlr_scene_node_set_position(&l->scene->node, geometry->x, geometry->y);
-
-	struct wlr_scene_tree *surface_tree = layer_surface_tree(l);
-	struct wlr_box visible;
-	if (surface_tree && wlr_box_intersection(&visible, &box, &l->mon->m)) {
-		int32_t x, y;
-		wlr_scene_node_coords(&surface_tree->node, &x, &y);
-		struct wlr_box clip = {
-			.x = visible.x - x,
-			.y = visible.y - y,
-			.width = visible.width,
-			.height = visible.height,
-		};
-		wlr_scene_subsurface_tree_set_clip(&surface_tree->node, &clip);
-		struct layer_expand_content content = {
-			.opacity = expand_content_opacity(progress),
-			.radius = layer_expand_radius(l, &box),
-		};
-		wlr_scene_node_for_each_buffer(&surface_tree->node,
-									   layer_expand_content, &content);
-	}
-	layer_expand_glass(l, &box, progress, false);
 	l->expand_progress = progress;
 	l->expand_geometry = *geometry;
 	l->animation.current = box;
+	layer_reapply_content(l);
+	layer_expand_glass(l, &box, progress);
 }
 
 void layer_animation_next_tick(LayerSurface *l) {
@@ -554,6 +584,7 @@ void layer_animation_next_tick(LayerSurface *l) {
 
 	int32_t type = l->animation.action == NONE ? MOVE : l->animation.action;
 	double factor = find_animation_curve_at(animation_passed, type);
+	l->animation_progress = MANGO_MIN(animation_passed, 1.0);
 
 	if (l->expand_opening) {
 		struct wlr_box geometry = l->geom;
@@ -614,8 +645,6 @@ void layer_animation_next_tick(LayerSurface *l) {
 			wlr_scene_blur_set_strength(l->blur, opacity);
 			wlr_scene_blur_set_alpha(l->blur, opacity);
 		}
-		wlr_scene_node_for_each_buffer(&l->scene->node,
-									   scene_buffer_apply_opacity, &opacity);
 	}
 
 	wlr_scene_node_set_position(&l->scene->node, x, y);
@@ -626,34 +655,14 @@ void layer_animation_next_tick(LayerSurface *l) {
 		.width = width,
 		.height = height,
 	};
-	bool clipped = layer_apply_output_clip(l, &animated);
-
-	BufferData buffer_data;
-	if (factor == 1.0) {
-		buffer_data.width_scale = 1.0f;
-		buffer_data.height_scale = 1.0f;
-	} else {
-		buffer_data.width_scale = (float)width / (float)l->current.width;
-		buffer_data.height_scale = (float)height / (float)l->current.height;
-	}
-
-	if (layer_open_animation_type(l) == ANIM_TYPE_ZOOM && !clipped) {
-		wlr_scene_node_for_each_buffer(
-			&l->scene->node, layer_scene_buffer_apply_effect, &buffer_data);
-	}
-
-	l->animation.current = (struct wlr_box){
-		.x = animated.x,
-		.y = animated.y,
-		.width = animated.width,
-		.height = animated.height,
-	};
+	l->animation.current = animated;
+	layer_reapply_content(l);
 
 	if (config.blur && l->blur &&
 		(l->glass || (config.blur_layer && !l->no_blur))) {
-		wlr_scene_node_set_position(&l->blur->node, 0, 0);
-		wlr_scene_blur_set_size(l->blur, l->animation.current.width,
-								l->animation.current.height);
+		wlr_scene_blur_set_geometry(l->blur, 0, 0, l->animation.current.width,
+									l->animation.current.height,
+									l->blur->corners);
 	}
 
 	if (animation_passed >= 1.0) {
@@ -780,15 +789,10 @@ start:
 	// animation start time
 	fadeout_layer->animation.time_started = get_now_in_ms();
 
-	// Insert the node into the close animation linked list;
-	// during screen refresh, it will check whether there are nodes in the list
-	// that can be applied to animation.
+	/* Snapshot lifetime is independent of output damage or presentation. */
 	wlr_scene_node_set_enabled(&fadeout_layer->scene->node, true);
 	wl_list_insert(&server.fadeout_layers, &fadeout_layer->fadeout_link);
-
-	// Requests a screen refresh.
-	if (l->mon)
-		wlr_output_schedule_frame(l->mon->wlr_output);
+	animation_schedule_tick();
 }
 void layer_set_pending_state(LayerSurface *l) {
 	if (!l || !l->layer_surface || !l->layer_surface->surface->mapped)
@@ -860,21 +864,28 @@ void layer_commit(LayerSurface *l) {
 
 		l->animation.initial = l->animainit_geom;
 		l->animation.time_started = get_now_in_ms();
+		l->animation_progress = 0.0;
 		if (l->animation.action == OPEN &&
 			layer_open_animation_type(l) == ANIM_TYPE_EXPAND) {
 			l->expand_opening = true;
 			l->expand_time_started = l->animation.time_started;
 			l->expand_duration = l->animation.duration;
 			l->expand_geometry = l->geom;
+			layer_expand_frame(l, &l->geom, 0.0);
 		}
 
 		// mark the animation start
 		l->animation.running = true;
 		l->animation.should_animate = false;
+		l->need_output_flush = true;
+		if (!l->expand_opening) {
+			wlr_scene_node_set_position(&l->scene->node,
+										l->animation.current.x,
+										l->animation.current.y);
+			layer_reapply_content(l);
+		}
 	}
-	// request screen refresh
-	if (l->mon)
-		wlr_output_schedule_frame(l->mon->wlr_output);
+	animation_schedule_layer(l);
 }
 bool layer_draw_frame(LayerSurface *l) {
 	if (!l || !l->mapped)
@@ -883,13 +894,11 @@ bool layer_draw_frame(LayerSurface *l) {
 	if (!l->need_output_flush)
 		return false;
 
-	if (l->layer_surface->current.layer != ZWLR_LAYER_SHELL_V1_LAYER_TOP &&
-		l->layer_surface->current.layer != ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY) {
-		return false;
-	}
-
-	if (config.animations && config.layer_animations &&
-		(l->animation.running || l->expand_opening) && !l->no_animation) {
+	if (l->animation.running || l->expand_opening) {
+		if (!config.animations || !config.layer_animations || l->no_animation) {
+			l->animation.time_started = get_now_in_ms() - l->animation.duration;
+			l->expand_time_started = get_now_in_ms() - l->expand_duration;
+		}
 		layer_animation_next_tick(l);
 		layer_draw_shield(l);
 		layer_draw_shadow(l);
@@ -898,7 +907,7 @@ bool layer_draw_frame(LayerSurface *l) {
 		layer_draw_shadow(l);
 		l->need_output_flush = false;
 	}
-	return true;
+	return l->animation.running || l->expand_opening;
 }
 bool layer_draw_fadeout_frame(LayerSurface *l) {
 	if (!l)

@@ -419,6 +419,7 @@ handle_cursor_axis(struct wl_listener *listener, void *data) {
 	if (check_trackpad_disabled(event->pointer)) {
 		return;
 	}
+	power_on_monitors(NULL);
 
 	mods = keyboard_hard_modifiers();
 
@@ -793,6 +794,7 @@ void handle_cursor_motion_absolute(struct wl_listener *listener, void *data) {
 	if (check_trackpad_disabled(event->pointer)) {
 		return;
 	}
+	power_on_monitors(NULL);
 
 	if (!event->time_msec) /* this is 0 with virtual pointer */
 		wlr_cursor_warp_absolute(server.cursor, &event->pointer->base, event->x,
@@ -1431,6 +1433,7 @@ void handle_cursor_motion(struct wl_listener *listener, void *data) {
 	if (check_trackpad_disabled(event->pointer)) {
 		return;
 	}
+	power_on_monitors(NULL);
 
 	pointer_process_motion(event->time_msec, &event->pointer->base,
 						   event->delta_x, event->delta_y, event->unaccel_dx,
@@ -1726,6 +1729,8 @@ bool pointer_process_button_press(struct wlr_pointer_button_event *event) {
 	if (event->pointer && check_trackpad_disabled(event->pointer)) {
 		return true;
 	}
+	if (event->state == WL_POINTER_BUTTON_STATE_PRESSED)
+		power_on_monitors(NULL);
 
 	if (trackpad_gesture_drag_active()) {
 		return true;

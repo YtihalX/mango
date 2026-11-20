@@ -23,6 +23,18 @@ Blur creates a frosted glass effect for transparent windows.
 
 > **Warning:** Blur has a relatively high impact on performance. If your hardware is limited, it is not recommended to enable it. If you experience lag with blur on, ensure `blur_optimized=1` — disabling it will significantly increase GPU consumption and may cause rendering lag. To disable blur entirely, set `blur=0`.
 
+Changing a selection lens damages the old and new clipped lens footprints,
+not the surrounding glass slab. The renderer still accounts for nearby pixels
+sampled by blur and refraction: as far as each glass's own rim refracts, and
+its lens's rim only while it has a lens.
+
+Each output allocates the buffers blur works in, each the size of the output,
+on first use: none while nothing is blurred, and the two that cache the
+blurred wallpaper only once a blur reads it (any blur with `blur_optimized=1`;
+otherwise plain blur on tiled windows and the bottom layer). Brightness,
+contrast, saturation and noise are applied in the blur's last pass, not in a
+pass of their own.
+
 ---
 
 ## Shadows

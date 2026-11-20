@@ -1,13 +1,19 @@
 #include "mango/animation/common.h"
+#include "mango/animation/client.h"
+#include "mango/animation/layer.h"
 #include "mango/common/scene_node.h"
 #include "mango/common/server.h"
 #include "mango/common/util.h"
 #include "mango/config/parse.h"
 #include "mango/manage/client.h"
 #include "mango/manage/monitor.h"
+#include "mango/manage/layer.h"
+#include <wlr/backend/session.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_subcompositor.h>
+
+static uint64_t animation_deadline_ns;
 
 struct dvec2 calculate_animation_curve_at(double t, int32_t type) {
 	struct dvec2 point;
@@ -414,9 +420,9 @@ static void scene_snapshot_prepare_clip(struct wlr_scene_node *node,
 		}
 
 		wlr_scene_node_set_enabled(node, true);
-		wlr_scene_node_set_position(node, meta->orig_x + visible.x - box.x,
-									meta->orig_y + visible.y - box.y);
-		wlr_scene_blur_set_size(blur, visible.width, visible.height);
+		wlr_scene_blur_set_geometry(blur, meta->orig_x + visible.x - box.x,
+									meta->orig_y + visible.y - box.y,
+									visible.width, visible.height, blur->corners);
 		return;
 	}
 	if (node->type != WLR_SCENE_NODE_TREE) {
@@ -544,6 +550,143 @@ void scene_snapshot_clip_to_box(struct wlr_scene_tree *snapshot,
 	scene_snapshot_prepare_clip(&snapshot->node, &clip);
 	wlr_scene_node_for_each_buffer(&snapshot->node, scene_snapshot_clip_buffer,
 								   &clip);
+}
+
+static bool animation_clock_busy(void) {
+	return !wl_list_empty(&server.animation_clients) ||
+		   !wl_list_empty(&server.animation_layers) ||
+		   !wl_list_empty(&server.fadeout_clients) ||
+		   !wl_list_empty(&server.fadeout_layers);
+}
+
+static void animation_clock_stop_if_idle(void) {
+	if (server.animation_timer && !animation_clock_busy()) {
+		wl_event_source_timer_update(server.animation_timer, 0);
+		server.animation_timer_armed = false;
+	}
+}
+
+void animation_schedule_tick(void) {
+	if (!server.animation_timer || server.animation_timer_armed ||
+		!server.allow_frame_scheduling ||
+		(server.session && !server.session->active) || !animation_clock_busy())
+		return;
+	wl_event_source_timer_update(server.animation_timer, 1);
+	animation_deadline_ns = 0;
+	server.animation_timer_armed = true;
+}
+
+void animation_schedule_client(Client *c) {
+	if (!c || c->iskilling || !server.allow_frame_scheduling)
+		return;
+	if (!c->animation_link.next)
+		wl_list_insert(&server.animation_clients, &c->animation_link);
+	animation_schedule_tick();
+}
+
+void animation_cancel_client(Client *c) {
+	if (c->animation_link.next) {
+		wl_list_remove(&c->animation_link);
+		c->animation_link.next = c->animation_link.prev = NULL;
+	}
+	animation_clock_stop_if_idle();
+}
+
+void animation_schedule_layer(LayerSurface *l) {
+	if (!l || !server.allow_frame_scheduling)
+		return;
+	if (!l->animation_link.next)
+		wl_list_insert(&server.animation_layers, &l->animation_link);
+	animation_schedule_tick();
+}
+
+void animation_cancel_layer(LayerSurface *l) {
+	if (l->animation_link.next) {
+		wl_list_remove(&l->animation_link);
+		l->animation_link.next = l->animation_link.prev = NULL;
+	}
+	animation_clock_stop_if_idle();
+}
+
+static int animation_tick(void *data) {
+	server.animation_timer_armed = false;
+	if (!server.allow_frame_scheduling ||
+		(server.session && !server.session->active))
+		return 0;
+
+	Client *c, *ctmp;
+	LayerSurface *l, *ltmp;
+	wl_list_for_each_safe(c, ctmp, &server.animation_clients, animation_link) {
+		if (!client_draw_frame(c))
+			animation_cancel_client(c);
+	}
+	wl_list_for_each_safe(l, ltmp, &server.animation_layers, animation_link) {
+		if (!layer_draw_frame(l))
+			animation_cancel_layer(l);
+	}
+	wl_list_for_each_safe(c, ctmp, &server.fadeout_clients, fadeout_link)
+		client_draw_fadeout_frame(c);
+	wl_list_for_each_safe(l, ltmp, &server.fadeout_layers, fadeout_link)
+		layer_draw_fadeout_frame(l);
+
+	if (animation_clock_busy()) {
+		/* Sample once at the fastest enabled output's cadence. Outputs still
+		 * present independently, and integer/easing plateaus need no damage. */
+		int32_t refresh = 0;
+		Monitor *m;
+		wl_list_for_each(m, &server.monitors, link) {
+			if (m->wlr_output->enabled)
+				refresh = MANGO_MAX(refresh, m->wlr_output->refresh);
+		}
+		if (refresh <= 0)
+			refresh = 60000;
+		struct timespec now;
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		uint64_t now_ns = (uint64_t)now.tv_sec * 1000000000 + now.tv_nsec;
+		uint64_t interval_ns = 1000000000000ull / refresh;
+		animation_deadline_ns += interval_ns;
+		if (animation_deadline_ns <= now_ns)
+			animation_deadline_ns = now_ns + interval_ns;
+		/* Keep the fractional period; rounding every delay would, for
+		 * example, run a 240 Hz animation at no more than 200 Hz. */
+		int delay_ms = (animation_deadline_ns - now_ns + 999999) / 1000000;
+		wl_event_source_timer_update(server.animation_timer, delay_ms);
+		server.animation_timer_armed = true;
+	}
+	return 0;
+}
+
+static void animation_session_active(struct wl_listener *listener, void *data) {
+	if (server.session->active) {
+		animation_schedule_tick();
+	} else {
+		wl_event_source_timer_update(server.animation_timer, 0);
+		server.animation_timer_armed = false;
+	}
+}
+
+void animation_clock_init(void) {
+	wl_list_init(&server.animation_clients);
+	wl_list_init(&server.animation_layers);
+	server.animation_timer =
+		wl_event_loop_add_timer(server.event_loop, animation_tick, NULL);
+	if (!server.animation_timer)
+		die("couldn't create animation clock");
+	if (server.session) {
+		server.animation_session_active.notify = animation_session_active;
+		wl_signal_add(&server.session->events.active,
+					  &server.animation_session_active);
+	}
+}
+
+void animation_clock_finish(void) {
+	if (server.session)
+		wl_list_remove(&server.animation_session_active.link);
+	if (server.animation_timer) {
+		wl_event_source_remove(server.animation_timer);
+		server.animation_timer = NULL;
+	}
+	server.animation_timer_armed = false;
 }
 
 void request_fresh_all_monitors(void) {

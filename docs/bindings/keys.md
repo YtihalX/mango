@@ -211,6 +211,8 @@ It is formed by tag numbers `1`–`9`, optionally combined with `|`.
 | `sleep_monitor` | `monitor_spec` | Shutdown monitor power but not remove. Accepts a [monitor spec](/docs/configuration/monitors#monitor-spec-format). |
 | `wakeup_monitor` | `monitor_spec` | Turn on monitor power. Accepts a [monitor spec](/docs/configuration/monitors#monitor-spec-format). |
 | `sleep_toggle_monitor` | `monitor_spec` | Toggle monitor power but not remove. Accepts a [monitor spec](/docs/configuration/monitors#monitor-spec-format).
+| `power_off_monitors` | - | Turn every lit monitor's power off, keeping it in the layout, until a key or button press, pointer motion, scrolling, a touchpad gesture, a touch or a tablet pen wakes them. The waking input still reaches its target. |
+| `power_on_monitors` | - | Turn the monitors that `power_off_monitors` turned off back on. |
 | `disable_monitor` | `monitor_spec` | remove monitor. Accepts a [monitor spec](/docs/configuration/monitors#monitor-spec-format). |
 | `enable_monitor` | `monitor_spec` | add monitor. Accepts a [monitor spec](/docs/configuration/monitors#monitor-spec-format). |
 | `toggle_monitor` | `monitor_spec` | Toggle monitor add/remove. Accepts a [monitor spec](/docs/configuration/monitors#monitor-spec-format). |

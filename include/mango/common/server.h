@@ -61,6 +61,12 @@ struct MangoServer {
 	struct wl_list focus_stack; /* focus order */
 	struct wl_list fadeout_clients;
 	struct wl_list fadeout_layers;
+	struct wl_list animation_clients;
+	struct wl_list animation_layers;
+	struct wl_event_source *animation_timer;
+	struct wl_listener animation_session_active;
+	bool animation_timer_armed;
+	bool monitors_powered_off; /* some Monitor.powered_off is set */
 	struct wlr_idle_notifier_v1 *idle_notifier;
 	struct wlr_idle_inhibit_manager_v1 *idle_inhibit_manager;
 	struct wlr_layer_shell_v1 *layer_shell;

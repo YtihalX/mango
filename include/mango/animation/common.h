@@ -1,6 +1,7 @@
 #ifndef __ANIMATION_COMMON_H__
 #define __ANIMATION_COMMON_H__ 1
 
+#include "mango/common/types.h"
 #include <scenefx/types/fx/clipped_region.h>
 #include <scenefx/types/wlr_scene.h>
 #include <stdbool.h>
@@ -90,6 +91,15 @@ void scene_snapshot_clip_to_box(struct wlr_scene_tree *snapshot,
 								const struct wlr_box *bounds, bool scale,
 								int32_t width, int32_t height);
 void request_fresh_all_monitors(void);
+
+/* The shared clock owns advancement; scene damage wakes only painted outputs. */
+void animation_clock_init(void);
+void animation_clock_finish(void);
+void animation_schedule_tick(void);
+void animation_schedule_client(Client *c);
+void animation_cancel_client(Client *c);
+void animation_schedule_layer(LayerSurface *l);
+void animation_cancel_layer(LayerSurface *l);
 
 /*
  * Expanding glass: a surface grows out of an origin point (layout

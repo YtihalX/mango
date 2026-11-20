@@ -21,6 +21,7 @@ typedef struct LayerSurface {
 	struct wlr_scene_layer_surface_v1 *scene_layer;
 	struct wl_list link;
 	struct wl_list fadeout_link;
+	struct wl_list animation_link;
 	int32_t mapped;
 	struct wlr_layer_surface_v1 *layer_surface;
 
@@ -33,6 +34,7 @@ typedef struct LayerSurface {
 	/* Keep the opening phase when an unmap interrupts the growing slab. */
 	double expand_origin_x, expand_origin_y;
 	double expand_progress;
+	double animation_progress;
 	/* Restacking retargets MOVE without restarting this independent reveal. */
 	struct wlr_box expand_geometry;
 	uint32_t expand_time_started, expand_duration;

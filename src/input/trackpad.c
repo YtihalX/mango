@@ -806,6 +806,7 @@ void handle_cursor_swipe_begin(struct wl_listener *listener, void *data) {
 	if (!trackpad_enabled()) {
 		return;
 	}
+	power_on_monitors(NULL);
 
 	keyboard_cancel_pending_release_bind();
 
@@ -874,6 +875,7 @@ void handle_cursor_pinch_begin(struct wl_listener *listener, void *data) {
 	if (!trackpad_enabled()) {
 		return;
 	}
+	power_on_monitors(NULL);
 
 	keyboard_cancel_pending_release_bind();
 
@@ -913,6 +915,7 @@ void handle_cursor_hold_begin(struct wl_listener *listener, void *data) {
 	if (!trackpad_enabled()) {
 		return;
 	}
+	power_on_monitors(NULL);
 
 	keyboard_cancel_pending_release_bind();
 

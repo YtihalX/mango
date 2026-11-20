@@ -35,8 +35,16 @@ void arrange_layer(Monitor *m, struct wl_list *list,
 		if (l->being_unmapped)
 			continue;
 
+		/* Configuring a layer also places its scene tree at the final box.
+		 * While animating, only the shared tick owns that position. */
+		bool animating = l->animation.running || l->expand_opening;
+		int32_t x = l->scene->node.x, y = l->scene->node.y;
 		wlr_scene_layer_surface_v1_configure(l->scene_layer, &full_area,
 											 usable_area);
+		if (animating) {
+			wlr_scene_node_set_position(&l->scene->node, x, y);
+			layer_reapply_content(l);
+		}
 		wlr_scene_node_set_position(&l->popups->node, l->scene->node.x,
 									l->scene->node.y);
 	}
@@ -138,11 +146,18 @@ void arrange_layers(Monitor *m) {
 			get_layer_target_geometry(l, &box);
 			if (!wlr_box_equal(&box, &l->geom)) {
 				l->geom = box;
-				l->animainit_geom = l->animation.current = l->current =
-					l->pending = l->geom;
-				l->animation.initial = l->geom;
-				l->need_output_flush = true;
-				wlr_scene_node_set_position(&l->scene->node, box.x, box.y);
+				if (l->expand_opening) {
+					l->animation.action = MOVE;
+					l->animation.duration = config.animation_duration_move;
+					layer_set_pending_state(l);
+				} else {
+					l->animainit_geom = l->animation.current = l->current =
+						l->pending = l->geom;
+					l->animation.initial = l->geom;
+					l->need_output_flush = true;
+					animation_schedule_layer(l);
+					wlr_scene_node_set_position(&l->scene->node, box.x, box.y);
+				}
 			}
 		}
 	}
@@ -169,12 +184,14 @@ void iter_layer_scene_buffers(struct wlr_scene_buffer *buffer, int32_t sx,
 
 	wlr_scene_node_set_enabled(&l->blur->node, true);
 	wlr_scene_blur_set_transparency_mask_source(l->blur, buffer);
-	wlr_scene_blur_set_size(l->blur, l->geom.width, l->geom.height);
+	if (!l->expand_opening)
+		wlr_scene_blur_set_size(l->blur, l->geom.width, l->geom.height);
 	wlr_scene_blur_set_should_only_blur_bottom_layer(
 		l->blur, layer_blur_uses_wallpaper(l));
 	// Glass takes its shape from the layer's box and radius, not the mask
 	wlr_scene_blur_set_glass(l->blur, l->glass);
-	wlr_scene_blur_set_corner_radius(l->blur, l->glass_radius);
+	if (!l->expand_opening)
+		wlr_scene_blur_set_corner_radius(l->blur, l->glass_radius);
 }
 
 bool layer_blur_uses_wallpaper(LayerSurface *l) {
@@ -276,6 +293,7 @@ void handle_layer_surface_map(struct wl_listener *listener, void *data) {
 		l->animainit_geom = l->animation.current = l->current = l->pending =
 			l->geom;
 	}
+	animation_schedule_layer(l);
 
 	// Refreshes the layout so windows notice exclude_zone changes and sets the
 	// exclusive surface.
@@ -349,6 +367,7 @@ void handle_layer_surface_commit(struct wl_listener *listener, void *data) {
 			l->animainit_geom = l->animation.current = l->current = l->pending =
 				l->geom;
 			l->need_output_flush = true;
+			animation_schedule_layer(l);
 		}
 	}
 
@@ -370,7 +389,7 @@ void handle_layer_surface_commit(struct wl_listener *listener, void *data) {
 	l->mapped = layer_surface->surface->mapped;
 	if (l->expand_opening ||
 		(l->animation.running && l->animation.action == OPEN))
-		layer_animation_next_tick(l);
+		layer_reapply_content(l);
 	else
 		glass_lens_apply(layer_surface->surface);
 
@@ -702,6 +721,7 @@ void handle_new_layer_surface(struct wl_listener *listener, void *data) {
 
 void handle_layer_node_destroy(struct wl_listener *listener, void *data) {
 	LayerSurface *l = wl_container_of(listener, l, destroy);
+	animation_cancel_layer(l);
 
 	wl_list_remove(&l->link);
 	wl_list_remove(&l->destroy.link);
@@ -717,6 +737,7 @@ void handle_layer_surface_unmap(struct wl_listener *listener, void *data) {
 
 	l->mapped = 0;
 	l->being_unmapped = true;
+	animation_cancel_layer(l);
 
 	init_fadeout_layers(l);
 

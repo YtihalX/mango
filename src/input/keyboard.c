@@ -709,6 +709,10 @@ void handle_keyboard_key(struct wl_listener *listener, void *data) {
 	if (!group->keyboard->xkb_state)
 		return;
 
+	/* A release, as of the bind that turned them off, doesn't wake them. */
+	if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED)
+		power_on_monitors(NULL);
+
 	server.last_active_keyboard = group->keyboard;
 
 	/* Translate libinput keycode -> xkbcommon */

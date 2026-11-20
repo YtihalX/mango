@@ -140,8 +140,10 @@ void reapply_property(void) {
 				APPLY_INT_PROP(c, r, popup_glass_radius);
 			}
 			client_sync_blur_optimized(c);
-			if (c->glass)
+			if (c->glass) {
 				c->need_output_flush = true;
+				animation_schedule_client(c);
+			}
 			client_set_group_config(c);
 			client_set_tab_bar_config(c);
 		}

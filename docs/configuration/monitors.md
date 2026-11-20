@@ -259,6 +259,19 @@ mmsg dispatch wakeup_monitor,eDP-1
 mmsg dispatch sleep_toggle_monitor,eDP-1
 ```
 
+To turn every monitor off until the next input, as niri's
+`power-off-monitors` does:
+
+```bash
+mmsg dispatch power_off_monitors
+```
+
+A key or button press, pointer motion, scrolling, a touchpad gesture, a touch
+or a tablet pen turns them back on, as does `power_on_monitors`. Key and button
+releases don't, so letting go of the bind's keys leaves them off. Monitors
+turned off with `sleep_monitor` or by a client of
+wlr-output-power-management stay off.
+
 You can also use `wlr-randr` for monitor management:
 
 ```bash
